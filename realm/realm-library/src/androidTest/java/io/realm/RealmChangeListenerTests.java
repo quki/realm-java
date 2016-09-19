@@ -98,6 +98,7 @@ public class RealmChangeListenerTests {
     public void returnedRealmResultsIsNotNull() {
         Realm realm = looperThread.realm;
         RealmResults<Cat> cats = realm.where(Cat.class).findAll();
+        looperThread.keepStrongReference.add(cats);
         cats.addChangeListener(new RealmChangeListener<RealmResults<Cat>>() {
             @Override
             public void onChange(RealmResults<Cat> result) {
@@ -116,6 +117,7 @@ public class RealmChangeListenerTests {
     public void returnedRealmResultsOfModelIsNotNull() {
         Realm realm = looperThread.realm;
         RealmResults<AllTypesRealmModel> alltypes = realm.where(AllTypesRealmModel.class).findAll();
+        looperThread.keepStrongReference.add(alltypes);
         alltypes.addChangeListener(new RealmChangeListener<RealmResults<AllTypesRealmModel>>() {
             @Override
             public void onChange(RealmResults<AllTypesRealmModel> result) {
@@ -125,7 +127,7 @@ public class RealmChangeListenerTests {
         });
 
         realm.beginTransaction();
-        AllTypesRealmModel model = realm.createObject(AllTypesRealmModel.class);
+        AllTypesRealmModel model = realm.createObject(AllTypesRealmModel.class, 0);
         model.columnString = "data 1";
         realm.commitTransaction();
     }
@@ -139,6 +141,7 @@ public class RealmChangeListenerTests {
         Cat cat = looperThread.realm.createObject(Cat.class);
         realm.commitTransaction();
 
+        looperThread.keepStrongReference.add(cat);
         cat.addChangeListener(new RealmChangeListener<Cat>() {
             @Override
             public void onChange(Cat object) {
@@ -157,9 +160,10 @@ public class RealmChangeListenerTests {
     public void returnedRealmModelIsNotNull() {
         Realm realm = looperThread.realm;
         realm.beginTransaction();
-        AllTypesRealmModel model = realm.createObject(AllTypesRealmModel.class);
+        AllTypesRealmModel model = realm.createObject(AllTypesRealmModel.class, 0);
         realm.commitTransaction();
 
+        looperThread.keepStrongReference.add(model);
         RealmObject.addChangeListener(model, new RealmChangeListener<AllTypesRealmModel>() {
             @Override
             public void onChange(AllTypesRealmModel object) {
@@ -184,6 +188,7 @@ public class RealmChangeListenerTests {
         DynamicRealmObject allTypes = dynamicRealm.createObject(AllTypes.CLASS_NAME);
         dynamicRealm.commitTransaction();
 
+        looperThread.keepStrongReference.add(allTypes);
         allTypes.addChangeListener(new RealmChangeListener<DynamicRealmObject>() {
             @Override
             public void onChange(DynamicRealmObject object) {
@@ -205,6 +210,7 @@ public class RealmChangeListenerTests {
 
         final DynamicRealm dynamicRealm = DynamicRealm.getInstance(looperThread.realmConfiguration);
         RealmResults<DynamicRealmObject> all = dynamicRealm.where(AllTypes.CLASS_NAME).findAll();
+        looperThread.keepStrongReference.add(all);
         all.addChangeListener(new RealmChangeListener<RealmResults<DynamicRealmObject>>() {
             @Override
             public void onChange(RealmResults<DynamicRealmObject> result) {

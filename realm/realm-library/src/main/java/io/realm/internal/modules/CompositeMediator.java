@@ -22,6 +22,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -31,9 +32,10 @@ import java.util.Set;
 import io.realm.Realm;
 import io.realm.RealmModel;
 import io.realm.internal.ColumnInfo;
-import io.realm.internal.ImplicitTransaction;
 import io.realm.internal.RealmObjectProxy;
 import io.realm.internal.RealmProxyMediator;
+import io.realm.internal.Row;
+import io.realm.internal.SharedRealm;
 import io.realm.internal.Table;
 import io.realm.internal.Util;
 
@@ -57,15 +59,16 @@ public class CompositeMediator extends RealmProxyMediator {
     }
 
     @Override
-    public Table createTable(Class<? extends RealmModel> clazz, ImplicitTransaction transaction) {
+    public Table createTable(Class<? extends RealmModel> clazz, SharedRealm sharedRealm) {
         RealmProxyMediator mediator = getMediator(clazz);
-        return mediator.createTable(clazz, transaction);
+        return mediator.createTable(clazz, sharedRealm);
     }
 
     @Override
-    public ColumnInfo validateTable(Class<? extends RealmModel> clazz, ImplicitTransaction transaction) {
+    public ColumnInfo validateTable(Class<? extends RealmModel> clazz, SharedRealm sharedRealm,
+                                    boolean allowExtraColumns) {
         RealmProxyMediator mediator = getMediator(clazz);
-        return mediator.validateTable(clazz, transaction);
+        return mediator.validateTable(clazz, sharedRealm, allowExtraColumns);
     }
 
     @Override
@@ -81,9 +84,14 @@ public class CompositeMediator extends RealmProxyMediator {
     }
 
     @Override
-    public <E extends RealmModel> E newInstance(Class<E> clazz, ColumnInfo columnInfo) {
+    public <E extends RealmModel> E newInstance(Class<E> clazz,
+                                                Object baseRealm,
+                                                Row row,
+                                                ColumnInfo columnInfo,
+                                                boolean acceptDefaultValue,
+                                                List<String> excludeFields) {
         RealmProxyMediator mediator = getMediator(clazz);
-        return mediator.newInstance(clazz, columnInfo);
+        return mediator.newInstance(clazz, baseRealm, row, columnInfo, acceptDefaultValue, excludeFields);
     }
 
     @Override
@@ -95,6 +103,30 @@ public class CompositeMediator extends RealmProxyMediator {
     public <E extends RealmModel> E copyOrUpdate(Realm realm, E object, boolean update, Map<RealmModel, RealmObjectProxy> cache) {
         RealmProxyMediator mediator = getMediator(Util.getOriginalModelClass(object.getClass()));
         return mediator.copyOrUpdate(realm, object, update, cache);
+    }
+
+    @Override
+    public void insert(Realm realm, RealmModel object, Map<RealmModel, Long> cache) {
+        RealmProxyMediator mediator = getMediator(Util.getOriginalModelClass(object.getClass()));
+        mediator.insert(realm, object, cache);
+    }
+
+    @Override
+    public void insert(Realm realm, Collection<? extends RealmModel> objects) {
+        RealmProxyMediator mediator = getMediator(Util.getOriginalModelClass(Util.getOriginalModelClass(objects.iterator().next().getClass())));
+        mediator.insert(realm, objects);
+    }
+
+    @Override
+    public void insertOrUpdate(Realm realm, RealmModel object, Map<RealmModel, Long> cache) {
+        RealmProxyMediator mediator = getMediator(Util.getOriginalModelClass(object.getClass()));
+        mediator.insertOrUpdate(realm, object, cache);
+    }
+
+    @Override
+    public void insertOrUpdate(Realm realm, Collection<? extends RealmModel> objects) {
+        RealmProxyMediator mediator = getMediator(Util.getOriginalModelClass(Util.getOriginalModelClass(objects.iterator().next().getClass())));
+        mediator.insertOrUpdate(realm, objects);
     }
 
     @Override

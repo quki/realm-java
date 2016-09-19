@@ -27,6 +27,7 @@ import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 import org.mockito.Mockito;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -37,9 +38,11 @@ import io.realm.entities.AllJavaTypes;
 import io.realm.entities.AllTypes;
 import io.realm.entities.AnnotationIndexTypes;
 import io.realm.entities.CyclicType;
+import io.realm.entities.DefaultValueOfField;
 import io.realm.entities.Dog;
 import io.realm.entities.NonLatinFieldNames;
 import io.realm.entities.Owner;
+import io.realm.entities.RandomPrimaryKey;
 import io.realm.entities.StringOnly;
 import io.realm.internal.Table;
 import io.realm.rule.RunInLooperThread;
@@ -342,7 +345,7 @@ public class RealmResultsTests extends CollectionTests {
     @Test
     @RunTestInLooperThread
     public void changeListener_syncIfNeeded_updatedFromOtherThread() {
-        final Realm realm = Realm.getInstance(looperThread.createConfiguration("Foo"));
+        final Realm realm = looperThread.realm;
         populateTestRealm(realm, 10);
 
         final RealmResults<AllTypes> results = realm.where(AllTypes.class).lessThan(AllTypes.FIELD_LONG, 10).findAll();
@@ -450,6 +453,10 @@ public class RealmResultsTests extends CollectionTests {
             }
         };
 
+        looperThread.keepStrongReference.add(distinctBool);
+        looperThread.keepStrongReference.add(distinctLong);
+        looperThread.keepStrongReference.add(distinctDate);
+        looperThread.keepStrongReference.add(distinctString);
         distinctBool.addChangeListener(new RealmChangeListener<RealmResults<AnnotationIndexTypes>>() {
             @Override
             public void onChange(RealmResults<AnnotationIndexTypes> object) {
@@ -512,6 +519,8 @@ public class RealmResultsTests extends CollectionTests {
             }
         };
 
+        looperThread.keepStrongReference.add(distinctDate);
+        looperThread.keepStrongReference.add(distinctString);
         distinctDate.addChangeListener(new RealmChangeListener<RealmResults<AnnotationIndexTypes>>() {
             @Override
             public void onChange(RealmResults<AnnotationIndexTypes> object) {
@@ -856,6 +865,7 @@ public class RealmResultsTests extends CollectionTests {
         Realm realm = looperThread.realm;
         RealmResults<AllTypes> collection = realm.where(AllTypes.class).findAll();
 
+        looperThread.keepStrongReference.add(collection);
         collection.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
             @Override
             public void onChange(RealmResults<AllTypes> object) {
@@ -900,6 +910,7 @@ public class RealmResultsTests extends CollectionTests {
         });
 
         // Adding it twice will be ignored, so removing it will not cause the listener to be triggered.
+        looperThread.keepStrongReference.add(collection);
         collection.addChangeListener(listener);
         collection.addChangeListener(listener);
         collection.removeChangeListener(listener);
@@ -933,6 +944,7 @@ public class RealmResultsTests extends CollectionTests {
             }
         };
 
+        looperThread.keepStrongReference.add(collection);
         collection.addChangeListener(listener);
         collection.removeChangeListener(listener);
 
@@ -983,6 +995,7 @@ public class RealmResultsTests extends CollectionTests {
             }
         };
 
+        looperThread.keepStrongReference.add(collection);
         collection.addChangeListener(listenerA);
         collection.addChangeListener(listenerB);
         collection.removeChangeListeners();
@@ -1026,5 +1039,80 @@ public class RealmResultsTests extends CollectionTests {
         realm.commitTransaction();
 
         assertEquals(0, realm.where(StringOnly.class).findAll().size());
+    }
+
+    @Test
+    public void syncQuery_defaultValuesAreIgnored() {
+        final String fieldIgnoredValue = DefaultValueOfField.FIELD_IGNORED_DEFAULT_VALUE + ".modified";
+        final String fieldStringValue = DefaultValueOfField.FIELD_STRING_DEFAULT_VALUE + ".modified";
+        final String fieldRandomStringValue = "non-random";
+        final short fieldShortValue = (short) (DefaultValueOfField.FIELD_SHORT_DEFAULT_VALUE + 1);
+        final int fieldIntValue = DefaultValueOfField.FIELD_INT_DEFAULT_VALUE + 1;
+        final long fieldLongPrimaryKeyValue = DefaultValueOfField.FIELD_LONG_PRIMARY_KEY_DEFAULT_VALUE + 1;
+        final long fieldLongValue = DefaultValueOfField.FIELD_LONG_DEFAULT_VALUE + 1;
+        final byte fieldByteValue = (byte) (DefaultValueOfField.FIELD_BYTE_DEFAULT_VALUE + 1);
+        final float fieldFloatValue = DefaultValueOfField.FIELD_FLOAT_DEFAULT_VALUE + 1;
+        final double fieldDoubleValue = DefaultValueOfField.FIELD_DOUBLE_DEFAULT_VALUE + 1;
+        final boolean fieldBooleanValue = !DefaultValueOfField.FIELD_BOOLEAN_DEFAULT_VALUE;
+        final Date fieldDateValue = new Date(DefaultValueOfField.FIELD_DATE_DEFAULT_VALUE.getTime() + 1);
+        final byte[] fieldBinaryValue = {(byte) (DefaultValueOfField.FIELD_BINARY_DEFAULT_VALUE[0] - 1)};
+        final int fieldObjectIntValue = RandomPrimaryKey.FIELD_INT_DEFAULT_VALUE + 1;
+        final int fieldListIntValue = RandomPrimaryKey.FIELD_INT_DEFAULT_VALUE + 2;
+
+        realm.executeTransaction(new Realm.Transaction() {
+            @Override
+            public void execute(Realm realm) {
+                final DefaultValueOfField obj = new DefaultValueOfField();
+                obj.setFieldIgnored(fieldIgnoredValue);
+                obj.setFieldString(fieldStringValue);
+                obj.setFieldRandomString(fieldRandomStringValue);
+                obj.setFieldShort(fieldShortValue);
+                obj.setFieldInt(fieldIntValue);
+                obj.setFieldLongPrimaryKey(fieldLongPrimaryKeyValue);
+                obj.setFieldLong(fieldLongValue);
+                obj.setFieldByte(fieldByteValue);
+                obj.setFieldFloat(fieldFloatValue);
+                obj.setFieldDouble(fieldDoubleValue);
+                obj.setFieldBoolean(fieldBooleanValue);
+                obj.setFieldDate(fieldDateValue);
+                obj.setFieldBinary(fieldBinaryValue);
+
+                final RandomPrimaryKey fieldObjectValue = new RandomPrimaryKey();
+                fieldObjectValue.setFieldInt(fieldObjectIntValue);
+                obj.setFieldObject(fieldObjectValue);
+
+                final RealmList<RandomPrimaryKey> list = new RealmList<>();
+                final RandomPrimaryKey listItem = new RandomPrimaryKey();
+                listItem.setFieldInt(fieldListIntValue);
+                list.add(listItem);
+                obj.setFieldList(list);
+
+                realm.copyToRealm(obj);
+            }
+        });
+
+        final RealmResults<DefaultValueOfField> result = realm.where(DefaultValueOfField.class)
+                .equalTo(DefaultValueOfField.FIELD_LONG_PRIMARY_KEY,
+                        fieldLongPrimaryKeyValue).findAll();
+
+        final DefaultValueOfField obj = result.first();
+
+        assertEquals(DefaultValueOfField.FIELD_IGNORED_DEFAULT_VALUE/*not fieldIgnoredValue*/,
+                obj.getFieldIgnored());
+        assertEquals(fieldStringValue, obj.getFieldString());
+        assertEquals(fieldRandomStringValue, obj.getFieldRandomString());
+        assertEquals(fieldShortValue, obj.getFieldShort());
+        assertEquals(fieldIntValue, obj.getFieldInt());
+        assertEquals(fieldLongPrimaryKeyValue, obj.getFieldLongPrimaryKey());
+        assertEquals(fieldLongValue, obj.getFieldLong());
+        assertEquals(fieldByteValue, obj.getFieldByte());
+        assertEquals(fieldFloatValue, obj.getFieldFloat(), 0f);
+        assertEquals(fieldDoubleValue, obj.getFieldDouble(), 0d);
+        assertEquals(fieldBooleanValue, obj.isFieldBoolean());
+        assertEquals(fieldDateValue, obj.getFieldDate());
+        assertTrue(Arrays.equals(fieldBinaryValue, obj.getFieldBinary()));
+        assertEquals(fieldObjectIntValue, obj.getFieldObject().getFieldInt());
+        assertEquals(1, obj.getFieldList().size());
+        assertEquals(fieldListIntValue, obj.getFieldList().first().getFieldInt());
     }
 }

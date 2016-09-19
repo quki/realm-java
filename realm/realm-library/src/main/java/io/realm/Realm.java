@@ -17,9 +17,8 @@
 package io.realm;
 
 import android.annotation.TargetApi;
-import android.content.Context;
+import android.app.IntentService;
 import android.os.Build;
-import android.os.Looper;
 import android.util.JsonReader;
 
 import org.json.JSONArray;
@@ -34,7 +33,10 @@ import java.io.InputStreamReader;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
@@ -42,16 +44,14 @@ import java.util.Set;
 import java.util.concurrent.Future;
 
 import io.realm.exceptions.RealmException;
-import io.realm.exceptions.RealmIOException;
+import io.realm.exceptions.RealmFileException;
 import io.realm.exceptions.RealmMigrationNeededException;
 import io.realm.internal.ColumnIndices;
 import io.realm.internal.ColumnInfo;
 import io.realm.internal.RealmObjectProxy;
 import io.realm.internal.RealmProxyMediator;
 import io.realm.internal.Table;
-import io.realm.internal.TableView;
-import io.realm.internal.Util;
-import io.realm.internal.log.RealmLog;
+import io.realm.log.RealmLog;
 import rx.Observable;
 
 /**
@@ -121,21 +121,16 @@ public final class Realm extends BaseRealm {
 
     public static final String DEFAULT_REALM_NAME = RealmConfiguration.DEFAULT_REALM_NAME;
 
-    // Caches Class objects (both model classes and proxy classes) to Realm Tables
-    private final Map<Class<? extends RealmModel>, Table> classToTable =
-            new HashMap<Class<? extends RealmModel>, Table>();
-
     private static RealmConfiguration defaultConfiguration;
 
     /**
      * The constructor is private to enforce the use of the static one.
      *
      * @param configuration the {@link RealmConfiguration} used to open the Realm.
-     * @param autoRefresh {@code true} if Realm should auto-refresh. {@code false} otherwise.
      * @throws IllegalArgumentException if trying to open an encrypted Realm with the wrong key.
      */
-    Realm(RealmConfiguration configuration, boolean autoRefresh) {
-        super(configuration, autoRefresh);
+    Realm(RealmConfiguration configuration) {
+        super(configuration);
     }
 
     /**
@@ -146,17 +141,6 @@ public final class Realm extends BaseRealm {
         return configuration.getRxFactory().from(this);
     }
 
-    @Override
-    protected void finalize() throws Throwable {
-        if (sharedGroupManager != null && sharedGroupManager.isOpen()) {
-            RealmLog.w("Remember to call close() on all Realm instances. " +
-                            "Realm " + configuration.getPath() + " is being finalized without being closed, " +
-                            "this can lead to running out of native memory."
-            );
-        }
-        super.finalize();
-    }
-
     /**
      * Realm static constructor that returns the Realm instance defined by the {@link io.realm.RealmConfiguration} set
      * by {@link #setDefaultConfiguration(RealmConfiguration)}
@@ -165,7 +149,7 @@ public final class Realm extends BaseRealm {
      * @throws java.lang.NullPointerException if no default configuration has been defined.
      * @throws RealmMigrationNeededException if no migration has been provided by the default configuration and the
      *         RealmObject classes or version has has changed so a migration is required.
-     * @throws RealmIOException if an error happened when accessing the underlying Realm file.
+     * @throws RealmFileException if an error happened when accessing the underlying Realm file.
      */
     public static Realm getDefaultInstance() {
         if (defaultConfiguration == null) {
@@ -181,7 +165,7 @@ public final class Realm extends BaseRealm {
      * @return an instance of the Realm class
      * @throws RealmMigrationNeededException if no migration has been provided by the configuration and the RealmObject
      *         classes or version has has changed so a migration is required.
-     * @throws RealmIOException if an error happened when accessing the underlying Realm file.
+     * @throws RealmFileException if an error happened when accessing the underlying Realm file.
      * @throws IllegalArgumentException if a null {@link RealmConfiguration} is provided.
      * @see RealmConfiguration for details on how to configure a Realm.
      */
@@ -218,14 +202,15 @@ public final class Realm extends BaseRealm {
      * Creates a {@link Realm} instance without checking the existence in the {@link RealmCache}.
      *
      * @param configuration {@link RealmConfiguration} used to create the Realm.
-     * @param columnIndices if this is not  {@code null}, the {@link BaseRealm#schema#columnIndices} will be
-     *                      initialized to it. Otherwise, {@link BaseRealm#schema#columnIndices} will be populated from
-     *                      the Realm file.
+     * @param globalCacheArray if this is not {@code null} and contains an entry for current schema version,
+     *                         the {@link BaseRealm#schema#columnIndices} will be initialized with the copy of
+     *                         the entry. Otherwise, {@link BaseRealm#schema#columnIndices} will be populated
+     *                         from the Realm file.
      * @return a {@link Realm} instance.
      */
-    static Realm createInstance(RealmConfiguration configuration, ColumnIndices columnIndices) {
+    static Realm createInstance(RealmConfiguration configuration, ColumnIndices[] globalCacheArray) {
         try {
-            return createAndValidate(configuration, columnIndices);
+            return createAndValidate(configuration, globalCacheArray);
 
         } catch (RealmMigrationNeededException e) {
             if (configuration.shouldDeleteRealmIfMigrationNeeded()) {
@@ -235,19 +220,19 @@ public final class Realm extends BaseRealm {
                     migrateRealm(configuration);
                 } catch (FileNotFoundException fileNotFoundException) {
                     // Should never happen
-                    throw new RealmIOException(fileNotFoundException);
+                    throw new RealmFileException(RealmFileException.Kind.NOT_FOUND, fileNotFoundException);
                 }
             }
 
-            return createAndValidate(configuration, columnIndices);
+            return createAndValidate(configuration, globalCacheArray);
         }
     }
 
-    static Realm createAndValidate(RealmConfiguration configuration, ColumnIndices columnIndices) {
-        boolean autoRefresh = Looper.myLooper() != null;
-        Realm realm = new Realm(configuration, autoRefresh);
+    static Realm createAndValidate(RealmConfiguration configuration, ColumnIndices[] globalCacheArray) {
+        Realm realm = new Realm(configuration);
         long currentVersion = realm.getVersion();
         long requiredVersion = configuration.getSchemaVersion();
+        final ColumnIndices columnIndices = RealmCache.findColumnIndices(globalCacheArray, requiredVersion);
         if (currentVersion != UNVERSIONED && currentVersion < requiredVersion && columnIndices == null) {
             realm.doClose();
             throw new RealmMigrationNeededException(configuration.getPath(), String.format("Realm on disk need to migrate from v%s to v%s", currentVersion, requiredVersion));
@@ -266,7 +251,8 @@ public final class Realm extends BaseRealm {
                 throw e;
             }
         } else {
-            realm.schema.columnIndices = columnIndices;
+            // copy global cache as a Realm local indices cache
+            realm.schema.columnIndices = columnIndices.clone();
         }
 
         return realm;
@@ -290,11 +276,13 @@ public final class Realm extends BaseRealm {
             for (Class<? extends RealmModel> modelClass : modelClasses) {
                 // Create and validate table
                 if (version == UNVERSIONED) {
-                    mediator.createTable(modelClass, realm.sharedGroupManager.getTransaction());
+                    mediator.createTable(modelClass, realm.sharedRealm);
                 }
-                columnInfoMap.put(modelClass, mediator.validateTable(modelClass, realm.sharedGroupManager.getTransaction()));
+                columnInfoMap.put(modelClass, mediator.validateTable(modelClass, realm.sharedRealm, false));
             }
-            realm.schema.columnIndices = new ColumnIndices(columnInfoMap);
+            realm.schema.columnIndices = new ColumnIndices(
+                    (version == UNVERSIONED) ? realm.configuration.getSchemaVersion() : version,
+                    columnInfoMap);
 
             if (version == UNVERSIONED) {
                 final Transaction transaction = realm.getConfiguration().getInitialDataTransaction();
@@ -304,7 +292,7 @@ public final class Realm extends BaseRealm {
             }
         } finally {
             if (commitNeeded) {
-                realm.commitTransaction(false, null);
+                realm.commitTransaction(false);
             } else {
                 realm.cancelTransaction();
             }
@@ -314,13 +302,14 @@ public final class Realm extends BaseRealm {
     /**
      * Creates a Realm object for each object in a JSON array. This must be done within a transaction.
      * <p>
-     * JSON properties with {@code null} values will map to the default value for the data type in Realm and unknown properties
-     * will be ignored. If a {@link RealmObject} field is not present in the JSON object the {@link RealmObject}
-     * field will be set to the default value for that type.
+     * JSON properties with unknown properties will be ignored. If a {@link RealmObject} field is not present in the
+     * JSON object the {@link RealmObject} field will be set to the default value for that type.
      *
      * @param clazz type of Realm objects to create.
      * @param json an array where each JSONObject must map to the specified class.
      * @throws RealmException if mapping from JSON fails.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      */
     public <E extends RealmModel> void createAllFromJson(Class<E> clazz, JSONArray json) {
         if (clazz == null || json == null) {
@@ -345,8 +334,9 @@ public final class Realm extends BaseRealm {
      *
      * @param clazz type of {@link io.realm.RealmObject} to create or update. It must have a primary key defined.
      * @param json array with object data.
-     * @throws java.lang.IllegalArgumentException if trying to update a class without a
-     *         {@link io.realm.annotations.PrimaryKey}.
+     * @throws IllegalArgumentException if trying to update a class without a {@link io.realm.annotations.PrimaryKey}.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      * @throws RealmException if unable to map JSON.
      * @see #createAllFromJson(Class, org.json.JSONArray)
      */
@@ -366,13 +356,14 @@ public final class Realm extends BaseRealm {
 
     /**
      * Creates a Realm object for each object in a JSON array. This must be done within a transaction.
-     * JSON properties with {@code null} values will map to the default value for the data type in Realm and unknown properties
-     * will be ignored. If a {@link RealmObject} field is not present in the JSON object the {@link RealmObject} field
-     * will be set to the default value for that type.
+     * JSON properties with unknown properties will be ignored. If a {@link RealmObject} field is not present in the
+     * JSON object the {@link RealmObject} field will be set to the default value for that type.
      *
      * @param clazz type of Realm objects to create.
      * @param json the JSON array as a String where each object can map to the specified class.
      * @throws RealmException if mapping from JSON fails.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      */
     public <E extends RealmModel> void createAllFromJson(Class<E> clazz, String json) {
         if (clazz == null || json == null || json.length() == 0) {
@@ -398,9 +389,10 @@ public final class Realm extends BaseRealm {
      *
      * @param clazz type of {@link io.realm.RealmObject} to create or update. It must have a primary key defined.
      * @param json string with an array of JSON objects.
-     * @throws java.lang.IllegalArgumentException if trying to update a class without a
-     *         {@link io.realm.annotations.PrimaryKey}.
+     * @throws IllegalArgumentException if trying to update a class without a {@link io.realm.annotations.PrimaryKey}.
      * @throws RealmException if unable to create a JSON array from the json string.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      * @see #createAllFromJson(Class, String)
      */
     public <E extends RealmModel> void createOrUpdateAllFromJson(Class<E> clazz, String json) {
@@ -421,13 +413,16 @@ public final class Realm extends BaseRealm {
 
     /**
      * Creates a Realm object for each object in a JSON array. This must be done within a transaction.
-     * JSON properties with {@code null} value will map to the default value for the data type in Realm and unknown properties
-     * will be ignored. If a {@link RealmObject} field is not present in the JSON object the {@link RealmObject} field
-     * will be set to the default value for that type.
+     * JSON properties with unknown properties will be ignored. If a {@link RealmObject} field is not present in the
+     * JSON object the {@link RealmObject} field will be set to the default value for that type.
+     * <p>
+     * This API is only available in API level 11 or later.
      *
      * @param clazz type of Realm objects created.
      * @param inputStream the JSON array as a InputStream. All objects in the array must be of the specified class.
      * @throws RealmException if mapping from JSON fails.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      * @throws IOException if something was wrong with the input stream.
      */
     @TargetApi(Build.VERSION_CODES.HONEYCOMB)
@@ -454,11 +449,14 @@ public final class Realm extends BaseRealm {
      * If updating a {@link RealmObject} and a field is not found in the JSON object, that field will not be updated.
      * If a new {@link RealmObject} is created and a field is not found in the JSON object, that field will be assigned
      * the default value for the field type.
+     * <p>
+     * This API is only available in API level 11 or later.
      *
      * @param clazz type of {@link io.realm.RealmObject} to create or update. It must have a primary key defined.
      * @param in the InputStream with a list of object data in JSON format.
-     * @throws java.lang.IllegalArgumentException if trying to update a class without a
-     *         {@link io.realm.annotations.PrimaryKey}.
+     * @throws IllegalArgumentException if trying to update a class without a {@link io.realm.annotations.PrimaryKey}.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      * @throws RealmException if unable to read JSON.
      * @see #createOrUpdateAllFromJson(Class, java.io.InputStream)
      */
@@ -489,14 +487,15 @@ public final class Realm extends BaseRealm {
 
     /**
      * Creates a Realm object pre-filled with data from a JSON object. This must be done inside a transaction. JSON
-     * properties with {@code null} values will map to the default value for the data type in Realm and unknown properties will
-     * be ignored. If a {@link RealmObject} field is not present in the JSON object the {@link RealmObject} field will
-     * be set to the default value for that type.
+     * properties with unknown properties will be ignored. If a {@link RealmObject} field is not present in the JSON
+     * object the {@link RealmObject} field will be set to the default value for that type.
      *
      * @param clazz type of Realm object to create.
      * @param json the JSONObject with object data.
      * @return created object or {@code null} if no JSON data was provided.
      * @throws RealmException if the mapping from JSON fails.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      * @see #createOrUpdateObjectFromJson(Class, org.json.JSONObject)
      */
     public <E extends RealmModel> E createObjectFromJson(Class<E> clazz, JSONObject json) {
@@ -520,8 +519,9 @@ public final class Realm extends BaseRealm {
      * @param clazz Type of {@link io.realm.RealmObject} to create or update. It must have a primary key defined.
      * @param json {@link org.json.JSONObject} with object data.
      * @return created or updated {@link io.realm.RealmObject}.
-     * @throws java.lang.IllegalArgumentException if trying to update a class without a
-     *         {@link io.realm.annotations.PrimaryKey}.
+     * @throws IllegalArgumentException if trying to update a class without a {@link io.realm.annotations.PrimaryKey}.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      * @throws RealmException if JSON data cannot be mapped.
      * @see #createObjectFromJson(Class, org.json.JSONObject)
      */
@@ -540,14 +540,15 @@ public final class Realm extends BaseRealm {
 
     /**
      * Creates a Realm object pre-filled with data from a JSON object. This must be done inside a transaction. JSON
-     * properties with {@code null} values will map to the default value for the data type in Realm and unknown properties will
-     * be ignored. If a {@link RealmObject} field is not present in the JSON object the {@link RealmObject} field will
-     * be set to the default value for that type.
+     * properties with unknown properties will be ignored. If a {@link RealmObject} field is not present in the JSON
+     * object the {@link RealmObject} field will be set to the default value for that type.
      *
      * @param clazz type of Realm object to create.
      * @param json the JSON string with object data.
      * @return created object or {@code null} if JSON string was empty or null.
      * @throws RealmException if mapping to json failed.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      */
     public <E extends RealmModel> E createObjectFromJson(Class<E> clazz, String json) {
         if (clazz == null || json == null || json.length() == 0) {
@@ -574,8 +575,9 @@ public final class Realm extends BaseRealm {
      * @param clazz type of {@link io.realm.RealmObject} to create or update. It must have a primary key defined.
      * @param json string with object data in JSON format.
      * @return created or updated {@link io.realm.RealmObject}.
-     * @throws java.lang.IllegalArgumentException if trying to update a class without a
-     *         {@link io.realm.annotations.PrimaryKey}.
+     * @throws IllegalArgumentException if trying to update a class without a {@link io.realm.annotations.PrimaryKey}.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      * @throws RealmException if JSON object cannot be mapped from the string parameter.
      * @see #createObjectFromJson(Class, String)
      */
@@ -597,14 +599,17 @@ public final class Realm extends BaseRealm {
 
     /**
      * Creates a Realm object pre-filled with data from a JSON object. This must be done inside a transaction. JSON
-     * properties with {@code null} value will map to the default value for the data type in Realm and unknown properties will
-     * be ignored. If a {@link RealmObject} field is not present in the JSON object the {@link RealmObject} field will
-     * be set to the default value for that type.
+     * properties with unknown properties will be ignored. If a {@link RealmObject} field is not present in the JSON
+     * object the {@link RealmObject} field will be set to the default value for that type.
+     * <p>
+     * This API is only available in API level 11 or later.
      *
      * @param clazz type of Realm object to create.
      * @param inputStream the JSON object data as a InputStream.
      * @return created object or {@code null} if JSON string was empty or null.
      * @throws RealmException if the mapping from JSON failed.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      * @throws IOException if something went wrong with the input stream.
      */
     @TargetApi(Build.VERSION_CODES.HONEYCOMB)
@@ -613,7 +618,7 @@ public final class Realm extends BaseRealm {
             return null;
         }
         E realmObject;
-        Table table = getTable(clazz);
+        Table table = schema.getTable(clazz);
         if (table.hasPrimaryKey()) {
             // As we need the primary key value we have to first parse the entire input stream as in the general
             // case that value might be the last property :(
@@ -647,12 +652,15 @@ public final class Realm extends BaseRealm {
      * {@link RealmObject} and a field is not found in the JSON object, that field will not be updated. If a new
      * {@link RealmObject} is created and a field is not found in the JSON object, that field will be assigned the
      * default value for the field type.
+     * <p>
+     * This API is only available in API level 11 or later.
      *
      * @param clazz type of {@link io.realm.RealmObject} to create or update. It must have a primary key defined.
      * @param in the {@link InputStream} with object data in JSON format.
      * @return created or updated {@link io.realm.RealmObject}.
-     * @throws java.lang.IllegalArgumentException if trying to update a class without a
-     *         {@link io.realm.annotations.PrimaryKey}.
+     * @throws IllegalArgumentException if trying to update a class without a {@link io.realm.annotations.PrimaryKey}.
+     * @throws IllegalArgumentException if the JSON object doesn't have a primary key property but the corresponding
+     * {@link RealmObjectSchema} has a {@link io.realm.annotations.PrimaryKey} defined.
      * @throws RealmException if failure to read JSON.
      * @see #createObjectFromJson(Class, java.io.InputStream)
      */
@@ -685,16 +693,42 @@ public final class Realm extends BaseRealm {
 
     /**
      * Instantiates and adds a new object to the Realm.
+     * <p>
+     * This method is only available for model classes with no @PrimaryKey annotation.
+     * If you like to create an object that has a primary key, use {@link #createObject(Class, Object)}
+     * or {@link #copyToRealm(RealmModel)} instead.
      *
      * @param clazz the Class of the object to create.
      * @return the new object.
-     * @throws RealmException if an object cannot be created.
+     * @throws RealmException if the primary key is defined in the model class or an object cannot be created.
+     * @see #createObject(Class, Object)
      */
     public <E extends RealmModel> E createObject(Class<E> clazz) {
         checkIfValid();
-        Table table = getTable(clazz);
+        return createObjectInternal(clazz, true, Collections.<String> emptyList());
+    }
+
+    /**
+     * Same as {@link #createObject(Class)} but this does not check the thread.
+     *
+     * @param clazz the Class of the object to create.
+     * @param acceptDefaultValue if {@code true}, default value of the object will be applied and
+     *                           if {@code false}, it will be ignored.
+     * @return the new object.
+     * @throws RealmException if the primary key is defined in the model class or an object cannot be created.
+     */
+    // called from proxy classes
+    <E extends RealmModel> E createObjectInternal(Class<E> clazz,
+                                                            boolean acceptDefaultValue,
+                                                            List<String> excludeFields) {
+        Table table = schema.getTable(clazz);
+        // Check and throw the exception earlier for a better exception message.
+        if (table.hasPrimaryKey()) {
+            throw new RealmException(String.format("'%s' has a primary key, use" +
+                    " 'createObject(Class<E>, Object)' instead.", Table.tableNameToClassName(table.getName())));
+        }
         long rowIndex = table.addEmptyRow();
-        return get(clazz, rowIndex);
+        return get(clazz, rowIndex, acceptDefaultValue, excludeFields);
     }
 
     /**
@@ -702,19 +736,40 @@ public final class Realm extends BaseRealm {
      * <p>
      * If the value violates the primary key constraint, no object will be added and a {@link RealmException} will be
      * thrown.
+     * The default value for primary key provided by the model class will be ignored.
      *
      * @param clazz the Class of the object to create.
      * @param primaryKeyValue value for the primary key field.
      * @return the new object.
      * @throws RealmException if object could not be created due to the primary key being invalid.
-     * @throws IllegalStateException if the model clazz does not have an primary key defined.
+     * @throws IllegalStateException if the model class does not have an primary key defined.
      * @throws IllegalArgumentException if the {@code primaryKeyValue} doesn't have a value that can be converted to the
      *                                  expected value.
      */
     public <E extends RealmModel> E createObject(Class<E> clazz, Object primaryKeyValue) {
-        Table table = getTable(clazz);
+        checkIfValid();
+        return createObjectInternal(clazz, primaryKeyValue, true, Collections.<String> emptyList());
+    }
+
+    /**
+     * Same as {@link #createObject(Class, Object)} but this does not check the thread.
+     *
+     * @param clazz the Class of the object to create.
+     * @param primaryKeyValue value for the primary key field.
+     * @param acceptDefaultValue if {@code true}, default value of the object will be applied and
+     *                           if {@code false}, it will be ignored.
+     * @return the new object.
+     * @throws RealmException if object could not be created due to the primary key being invalid.
+     * @throws IllegalStateException if the model class does not have an primary key defined.
+     * @throws IllegalArgumentException if the {@code primaryKeyValue} doesn't have a value that can be converted to the
+     */
+    // called from proxy classes
+    <E extends RealmModel> E createObjectInternal(Class<E> clazz, Object primaryKeyValue,
+                                                            boolean acceptDefaultValue,
+                                                            List<String> excludeFields) {
+        Table table = schema.getTable(clazz);
         long rowIndex = table.addEmptyRowWithPrimaryKey(primaryKeyValue);
-        return get(clazz, rowIndex);
+        return get(clazz, rowIndex, acceptDefaultValue, excludeFields);
     }
 
     /**
@@ -732,7 +787,7 @@ public final class Realm extends BaseRealm {
      */
     public <E extends RealmModel> E copyToRealm(E object) {
         checkNotNullObject(object);
-        return copyOrUpdate(object, false);
+        return copyOrUpdate(object, false, new HashMap<RealmModel, RealmObjectProxy>());
     }
 
     /**
@@ -752,7 +807,7 @@ public final class Realm extends BaseRealm {
     public <E extends RealmModel> E copyToRealmOrUpdate(E object) {
         checkNotNullObject(object);
         checkHasPrimaryKey(object.getClass());
-        return copyOrUpdate(object, true);
+        return copyOrUpdate(object, true, new HashMap<RealmModel, RealmObjectProxy>());
     }
 
     /**
@@ -772,13 +827,151 @@ public final class Realm extends BaseRealm {
         if (objects == null) {
             return new ArrayList<E>();
         }
-
+        Map<RealmModel, RealmObjectProxy> cache = new HashMap<RealmModel, RealmObjectProxy>();
         ArrayList<E> realmObjects = new ArrayList<E>();
         for (E object : objects) {
-            realmObjects.add(copyToRealm(object));
+            checkNotNullObject(object);
+            realmObjects.add(copyOrUpdate(object, false, cache));
         }
 
         return realmObjects;
+    }
+
+    /**
+     * Insert a list of an unmanaged RealmObjects. This is generally faster than {@link #copyToRealm(Iterable)} since it
+     * doesn't return the inserted elements, and performs minimum allocations and checks.
+     * After being inserted any changes to the original objects will not be persisted.
+     * <p>
+     * Please note:
+     * <ul>
+     * <li>
+     *     We don't check if the provided objects are already managed or not, so inserting a managed object might duplicate it.
+     *     Duplication will only happen if the object doesn't have a primary key. Objects with primary keys will never get duplicated.
+     * </li>
+     * <li>We don't create (nor return) a managed {@link RealmObject} for each element</li>
+     * <li>Copying an object will copy all field values. Any unset field in the object and child objects will be set to their default value if not provided</li>
+     * </ul>
+     * <p>
+     * If you want the managed {@link RealmObject} returned, use {@link #copyToRealm(Iterable)}, otherwise if
+     * you have a large number of object this method is generally faster.
+     *
+     * @param objects RealmObjects to insert.
+     * @throws IllegalStateException if the corresponding Realm is closed, called from an incorrect thread or not in a
+     * transaction.
+     * @see #copyToRealm(Iterable)
+     */
+    public void insert(Collection<? extends RealmModel> objects) {
+        checkIfValidAndInTransaction();
+        if (objects == null) {
+            throw new IllegalArgumentException("Null objects cannot be inserted into Realm.");
+        }
+        if (objects.isEmpty()) {
+            return;
+        }
+        configuration.getSchemaMediator().insert(this, objects);
+    }
+
+    /**
+     * Insert an unmanaged RealmObject. This is generally faster than {@link #copyToRealm(RealmModel)} since it
+     * doesn't return the inserted elements, and performs minimum allocations and checks.
+     * After being inserted any changes to the original object will not be persisted.
+     * <p>
+     * Please note:
+     * <ul>
+     * <li>
+     *     We don't check if the provided objects are already managed or not, so inserting a managed object might duplicate it.
+     *     Duplication will only happen if the object doesn't have a primary key. Objects with primary keys will never get duplicated.
+     * </li>
+     * <li>We don't create (nor return) a managed {@link RealmObject} for each element</li>
+     * <li>Copying an object will copy all field values. Any unset field in the object and child objects will be set to their default value if not provided</li>
+     * </ul>
+     * <p>
+     * If you want the managed {@link RealmObject} returned, use {@link #copyToRealm(RealmModel)}, otherwise if
+     * you have a large number of object this method is generally faster.
+     *
+     * @param object RealmObjects to insert.
+     * @throws IllegalStateException if the corresponding Realm is closed, called from an incorrect thread or not in a
+     * transaction.
+     * @throws io.realm.exceptions.RealmPrimaryKeyConstraintException if two objects with the same primary key is
+     * inserted or if a primary key value already exists in the Realm.
+     * @see #copyToRealm(RealmModel)
+     */
+    public void insert(RealmModel object) {
+        checkIfValidAndInTransaction();
+        if (object == null) {
+            throw new IllegalArgumentException("Null object cannot be inserted into Realm.");
+        }
+        Map<RealmModel, Long> cache = new IdentityHashMap<RealmModel, Long>();
+        configuration.getSchemaMediator().insert(this, object, cache);
+    }
+
+    /**
+     * Insert or update a list of unmanaged RealmObjects. This is generally faster than {@link #copyToRealmOrUpdate(Iterable)} since it
+     * doesn't return the inserted elements, and performs minimum allocations and checks.
+     * After being inserted any changes to the original objects will not be persisted.
+     * <p>
+     * Please note:
+     * <ul>
+     * <li>
+     *     We don't check if the provided objects are already managed or not, so inserting a managed object might duplicate it.
+     *     Duplication will only happen if the object doesn't have a primary key. Objects with primary keys will never get duplicated.
+     * </li>
+     * <li>We don't create (nor return) a managed {@link RealmObject} for each element</li>
+     * <li>Copying an object will copy all field values. Any unset field in the object and child objects will be set to their default value if not provided</li>
+     * </ul>
+     * <p>
+     * If you want the managed {@link RealmObject} returned, use {@link #copyToRealm(Iterable)}, otherwise if
+     * you have a large number of object this method is generally faster.
+     *
+     * @param objects RealmObjects to insert.
+     * @throws IllegalStateException if the corresponding Realm is closed, called from an incorrect thread or not in a
+     * transaction.
+     * @throws io.realm.exceptions.RealmPrimaryKeyConstraintException if two objects with the same primary key is
+     * inserted or if a primary key value already exists in the Realm.
+     *
+     * @see #copyToRealmOrUpdate(Iterable)
+     */
+    public void insertOrUpdate(Collection<? extends RealmModel> objects) {
+        checkIfValidAndInTransaction();
+        if (objects == null) {
+            throw new IllegalArgumentException("Null objects cannot be inserted into Realm.");
+        }
+        if (objects.isEmpty()) {
+            return;
+        }
+        configuration.getSchemaMediator().insertOrUpdate(this, objects);
+    }
+
+    /**
+     * Insert or update an unmanaged RealmObject. This is generally faster than {@link #copyToRealmOrUpdate(RealmModel)} since it
+     * doesn't return the inserted elements, and performs minimum allocations and checks.
+     * After being inserted any changes to the original object will not be persisted.
+     * <p>
+     * Please note:
+     * <ul>
+     * <li>
+     *     We don't check if the provided objects are already managed or not, so inserting a managed object might duplicate it.
+     *     Duplication will only happen if the object doesn't have a primary key. Objects with primary keys will never get duplicated.
+     * </li>
+     * <li>We don't create (nor return) a managed {@link RealmObject} for each element</li>
+     * <li>Copying an object will copy all field values. Any unset field in the object and child objects will be set to their default value if not provided</li>
+     * </ul>
+     * <p>
+     * If you want the managed {@link RealmObject} returned, use {@link #copyToRealm(RealmModel)}, otherwise if
+     * you have a large number of object this method is generally faster.
+     *
+     * @param object RealmObjects to insert.
+     * @throws IllegalStateException if the corresponding Realm is closed, called from an incorrect thread or not in a
+     * transaction.
+     * @see #copyToRealmOrUpdate(RealmModel)
+     */
+    public void insertOrUpdate(RealmModel object) {
+        checkIfValidAndInTransaction();
+        if (object == null) {
+            throw new IllegalArgumentException("Null object cannot be inserted into Realm.");
+        }
+        Map<RealmModel, Long> cache = new IdentityHashMap<RealmModel, Long>();
+        configuration.getSchemaMediator().insertOrUpdate(this, object, cache);
     }
 
     /**
@@ -799,9 +992,11 @@ public final class Realm extends BaseRealm {
             return new ArrayList<E>(0);
         }
 
+        Map<RealmModel, RealmObjectProxy> cache = new HashMap<RealmModel, RealmObjectProxy>();
         ArrayList<E> realmObjects = new ArrayList<E>();
         for (E object : objects) {
-            realmObjects.add(copyToRealmOrUpdate(object));
+            checkNotNullObject(object);
+            realmObjects.add(copyOrUpdate(object, true, cache));
         }
 
         return realmObjects;
@@ -937,7 +1132,7 @@ public final class Realm extends BaseRealm {
      *
      * @param listener the change listener.
      * @throws IllegalArgumentException if the change listener is {@code null}.
-     * @throws IllegalStateException if you try to register a listener from a non-Looper Thread.
+     * @throws IllegalStateException if you try to register a listener from a non-Looper or {@link IntentService} thread.
      * @see io.realm.RealmChangeListener
      * @see #removeChangeListener(RealmChangeListener)
      * @see #removeAllChangeListeners()
@@ -953,6 +1148,7 @@ public final class Realm extends BaseRealm {
      *
      * @param transaction the {@link io.realm.Realm.Transaction} to execute.
      * @throws IllegalArgumentException if the {@code transaction} is {@code null}.
+     * @throws RealmMigrationNeededException if the latest version contains incompatible schema changes.
      */
     public void executeTransaction(Transaction transaction) {
         if (transaction == null) {
@@ -967,7 +1163,7 @@ public final class Realm extends BaseRealm {
             if (isInTransaction()) {
                 cancelTransaction();
             } else {
-                RealmLog.w("Could not cancel transaction, not currently in a transaction.");
+                RealmLog.warn("Could not cancel transaction, not currently in a transaction.");
             }
             throw e;
         }
@@ -1038,16 +1234,16 @@ public final class Realm extends BaseRealm {
 
         // If the user provided a Callback then we make sure, the current Realm has a Handler
         // we can use to deliver the result
-        if ((onSuccess != null || onError != null)  && handler == null) {
+        if ((onSuccess != null || onError != null)  && !hasValidNotifier()) {
             throw new IllegalStateException("Your Realm is opened from a thread without a Looper" +
                     " and you provided a callback, we need a Handler to invoke your callback");
         }
 
-        // We need to use the same configuration to open a background SharedGroup (i.e Realm)
+        // We need to use the same configuration to open a background SharedRealm (i.e Realm)
         // to perform the transaction
         final RealmConfiguration realmConfiguration = getConfiguration();
 
-        final Future<?> pendingTransaction= asyncTaskExecutor.submit(new Runnable() {
+        final Future<?> pendingTransaction = asyncTaskExecutor.submitTransaction(new Runnable() {
             @Override
             public void run() {
                 if (Thread.currentThread().isInterrupted()) {
@@ -1062,15 +1258,11 @@ public final class Realm extends BaseRealm {
                     transaction.execute(bgRealm);
 
                     if (!Thread.currentThread().isInterrupted()) {
-                        bgRealm.commitTransaction(false, new Runnable() {
-                            @Override
-                            public void run() {
-                                // The bgRealm needs to be closed before post event to caller's handler to avoid
-                                // concurrency problem. eg.: User wants to delete Realm in the callbacks.
-                                // This will close Realm before sending REALM_CHANGED.
-                                bgRealm.close();
-                            }
-                        });
+                        // No need to send change notification to the work thread.
+                        bgRealm.commitTransaction(false);
+                        // The bgRealm needs to be closed before post event to caller's handler to avoid concurrency
+                        // problem. This is currently guaranteed by posting handleAsyncTransactionCompleted below.
+                        bgRealm.close();
                         transactionCommitted = true;
                     }
                 } catch (final Throwable e) {
@@ -1080,35 +1272,41 @@ public final class Realm extends BaseRealm {
                         if (bgRealm.isInTransaction()) {
                             bgRealm.cancelTransaction();
                         } else if (exception[0] != null) {
-                            RealmLog.w("Could not cancel transaction, not currently in a transaction.");
+                            RealmLog.warn("Could not cancel transaction, not currently in a transaction.");
                         }
                         bgRealm.close();
                     }
 
                     final Throwable backgroundException = exception[0];
                     // Send response as the final step to ensure the bg thread quit before others get the response!
-                    if (handler != null
-                            && !Thread.currentThread().isInterrupted()
-                            && handler.getLooper().getThread().isAlive()) {
-                        if (onSuccess != null && transactionCommitted) {
-                            handler.post(new Runnable() {
+                    if (hasValidNotifier() && !Thread.currentThread().isInterrupted()) {
+
+                        if (transactionCommitted) {
+                            // This will be treated like a special REALM_CHANGED event
+                            sharedRealm.realmNotifier.post(new Runnable() {
                                 @Override
                                 public void run() {
-                                    onSuccess.onSuccess();
+                                    handlerController.handleAsyncTransactionCompleted(onSuccess != null ? new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            onSuccess.onSuccess();
+                                        }
+                                    } : null);
                                 }
                             });
                         }
 
+                        // Send errors directly to the looper, so they don't get intercepted by the HandlerController.
                         if (backgroundException != null) {
                             if (onError != null) {
-                                handler.post(new Runnable() {
+                                sharedRealm.realmNotifier.post(new Runnable() {
                                     @Override
                                     public void run() {
                                         onError.onError(backgroundException);
                                     }
                                 });
                             } else {
-                                handler.post(new Runnable() {
+                                sharedRealm.realmNotifier.post(new Runnable() {
                                     @Override
                                     public void run() {
                                         if (backgroundException instanceof RuntimeException) {
@@ -1122,6 +1320,7 @@ public final class Realm extends BaseRealm {
                                 });
                             }
                         }
+
                     } else {
                         // Throw exception in the worker thread if the caller thread terminated
                         if (backgroundException != null) {
@@ -1152,14 +1351,14 @@ public final class Realm extends BaseRealm {
      */
     public void delete(Class<? extends RealmModel> clazz) {
         checkIfValid();
-        getTable(clazz).clear();
+        schema.getTable(clazz).clear();
     }
 
 
     @SuppressWarnings("unchecked")
-    private <E extends RealmModel> E copyOrUpdate(E object, boolean update) {
+    private <E extends RealmModel> E copyOrUpdate(E object, boolean update, Map<RealmModel, RealmObjectProxy> cache) {
         checkIfValid();
-        return configuration.getSchemaMediator().copyOrUpdate(this, object, update, new HashMap<RealmModel, RealmObjectProxy>());
+        return configuration.getSchemaMediator().copyOrUpdate(this, object, update, cache);
     }
 
     private <E extends RealmModel> E createDetachedCopy(E object, int maxDepth, Map<RealmModel, RealmObjectProxy.CacheData<RealmModel>> cache) {
@@ -1174,7 +1373,7 @@ public final class Realm extends BaseRealm {
     }
 
     private void checkHasPrimaryKey(Class<? extends RealmModel> clazz) {
-        if (!getTable(clazz).hasPrimaryKey()) {
+        if (!schema.getTable(clazz).hasPrimaryKey()) {
             throw new IllegalArgumentException("A RealmObject with no @PrimaryKey cannot be updated: " + clazz.toString());
         }
     }
@@ -1189,8 +1388,8 @@ public final class Realm extends BaseRealm {
         if (realmObject == null) {
             throw new IllegalArgumentException("Null objects cannot be copied from Realm.");
         }
-        if (!RealmObject.isValid(realmObject)) {
-            throw new IllegalArgumentException("RealmObject is not valid, so it cannot be copied.");
+        if (!(RealmObject.isManaged(realmObject) && RealmObject.isValid(realmObject))) {
+            throw new IllegalArgumentException("Only valid managed objects can be copied from Realm.");
         }
         if (realmObject instanceof DynamicRealmObject) {
             throw new IllegalArgumentException("DynamicRealmObject cannot be copied from Realm.");
@@ -1259,18 +1458,53 @@ public final class Realm extends BaseRealm {
         try {
             return realmFile.getCanonicalPath();
         } catch (IOException e) {
-            throw new RealmIOException("Could not resolve the canonical path to the Realm file: " + realmFile.getAbsolutePath());
+            throw new RealmFileException(RealmFileException.Kind.ACCESS_ERROR,
+                    "Could not resolve the canonical path to the Realm file: " + realmFile.getAbsolutePath(),
+                    e);
         }
     }
 
     Table getTable(Class<? extends RealmModel> clazz) {
-        Table table = classToTable.get(clazz);
-        if (table == null) {
-            clazz = Util.getOriginalModelClass(clazz);
-            table = sharedGroupManager.getTable(configuration.getSchemaMediator().getTableName(clazz));
-            classToTable.put(clazz, table);
+        return schema.getTable(clazz);
+    }
+
+    /**
+     * Updates own schema cache.
+     *
+     * @param globalCacheArray global cache of column indices. If it contains an entry for current
+     *                         schema version, this method only copies the indices information in the entry.
+     * @return newly created indices information for current schema version. Or {@code null} if
+     *          {@code globalCacheArray} already contains the entry for current schema version.
+     */
+    ColumnIndices updateSchemaCache(ColumnIndices[] globalCacheArray) {
+        final long currentSchemaVersion = sharedRealm.getSchemaVersion();
+        final long cacheSchemaVersion = schema.columnIndices.getSchemaVersion();
+        if (currentSchemaVersion == cacheSchemaVersion) {
+            return null;
         }
-        return table;
+
+        ColumnIndices createdGlobalCache = null;
+        final RealmProxyMediator mediator = getConfiguration().getSchemaMediator();
+        ColumnIndices cacheForCurrentVersion = RealmCache.findColumnIndices(globalCacheArray,
+                currentSchemaVersion);
+        if (cacheForCurrentVersion == null) {
+            // not found in global cache. create it.
+            final Set<Class<? extends RealmModel>> modelClasses = mediator.getModelClasses();
+            final Map<Class<? extends RealmModel>, ColumnInfo> map;
+            map = new HashMap<Class<? extends RealmModel>, ColumnInfo>(modelClasses.size());
+            try {
+                for (Class<? extends RealmModel> clazz : modelClasses) {
+                    final ColumnInfo columnInfo = mediator.validateTable(clazz, sharedRealm, true);
+                    map.put(clazz, columnInfo);
+                }
+            } catch (RealmMigrationNeededException e) {
+                throw e;
+            }
+
+            cacheForCurrentVersion = createdGlobalCache = new ColumnIndices(currentSchemaVersion, map);
+        }
+        schema.columnIndices.copyFrom(cacheForCurrentVersion, mediator);
+        return createdGlobalCache;
     }
 
     /**

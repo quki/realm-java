@@ -162,7 +162,7 @@ public class ClassMetaData {
         for (VariableElement field : fields) {
             if (Utils.isRealmList(field)) {
                 // Check for missing generic (default back to Object)
-                if (Utils.getGenericType(field) == null) {
+                if (Utils.getGenericTypeQualifiedName(field) == null) {
                     Utils.error("No generic type supplied for field", field);
                     return false;
                 }
@@ -371,6 +371,19 @@ public class ClassMetaData {
      */
     public boolean isNullable(VariableElement variableElement) {
         return nullableFields.contains(variableElement);
+    }
+
+    /**
+     * Checks if a VariableElement is a primary key.
+     *
+     * @param variableElement the element/field
+     * @return {@code true} if a VariableElement is primary key, {@code false} otherwise.
+     */
+    public boolean isPrimaryKey(VariableElement variableElement) {
+        if (primaryKey == null) {
+            return false;
+        }
+        return primaryKey.equals(variableElement);
     }
 
     private boolean isValidPrimaryKeyType(TypeMirror type) {

@@ -42,9 +42,11 @@ import io.realm.entities.Dog;
 import io.realm.entities.NonLatinFieldNames;
 import io.realm.entities.Owner;
 import io.realm.instrumentation.MockActivityManager;
+import io.realm.internal.HandlerControllerConstants;
 import io.realm.internal.RealmObjectProxy;
 import io.realm.internal.async.RealmThreadPoolExecutor;
-import io.realm.internal.log.RealmLog;
+import io.realm.log.LogLevel;
+import io.realm.log.RealmLog;
 import io.realm.rule.RunInLooperThread;
 import io.realm.rule.RunTestInLooperThread;
 import io.realm.rule.TestRealmConfigurationFactory;
@@ -170,7 +172,7 @@ public class RealmAsyncQueryTests {
     @Test
     @RunTestInLooperThread
     public void executeTransactionAsync_exceptionHandling() throws Throwable {
-        final TestHelper.TestLogger testLogger = new TestHelper.TestLogger();
+        final TestHelper.TestLogger testLogger = new TestHelper.TestLogger(LogLevel.DEBUG);
         RealmLog.add(testLogger);
 
         final Realm realm = looperThread.realm;
@@ -281,6 +283,35 @@ public class RealmAsyncQueryTests {
         }, transactionCallback);
     }
 
+    // Test case for https://github.com/realm/realm-java/issues/1893
+    // Ensure that onSuccess is called with the correct Realm version for async transaction.
+    @Test
+    @RunTestInLooperThread
+    public void executeTransactionAsync_asyncQuery() {
+        final Realm realm = looperThread.realm;
+        final RealmResults<AllTypes> results = realm.where(AllTypes.class).findAllAsync();
+        assertEquals(0, results.size());
+
+        realm.executeTransactionAsync(new Realm.Transaction() {
+            @Override
+            public void execute(Realm realm) {
+                realm.createObject(AllTypes.class);
+            }
+        }, new Realm.Transaction.OnSuccess() {
+            @Override
+            public void onSuccess() {
+                assertEquals(1, realm.where(AllTypes.class).count());
+                assertEquals(1, results.size());
+                looperThread.testComplete();
+            }
+        }, new Realm.Transaction.OnError() {
+            @Override
+            public void onError(Throwable error) {
+                fail();
+            }
+        });
+    }
+
     // ************************************
     // *** promises based async queries ***
     // ************************************
@@ -298,6 +329,7 @@ public class RealmAsyncQueryTests {
         assertFalse(results.isLoaded());
         assertEquals(0, results.size());
 
+        looperThread.keepStrongReference.add(results);
         results.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
             @Override
             public void onChange(RealmResults<AllTypes> object) {
@@ -334,7 +366,8 @@ public class RealmAsyncQueryTests {
         dog.setAge(10);
 
         assertTrue(dog.isLoaded());
-        assertFalse(dog.isValid());
+        assertTrue(dog.isValid());
+        assertFalse(dog.isManaged());
     }
 
     @Test
@@ -407,6 +440,7 @@ public class RealmAsyncQueryTests {
                 .between("columnLong", 0, 4)
                 .findAllAsync();
 
+        looperThread.keepStrongReference.add(realmResults);
         // notification should be called as well
         realmResults.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
             @Override
@@ -459,7 +493,7 @@ public class RealmAsyncQueryTests {
                 switch (what) {
                     // 5. Intercept all messages from other threads. On the first complete, we advance the tread
                     // which will cause the async query to rerun instead of triggering the change listener.
-                    case HandlerController.COMPLETED_ASYNC_REALM_RESULTS:
+                    case HandlerControllerConstants.COMPLETED_ASYNC_REALM_RESULTS:
                         if (intercepts == 1) {
                             // We advance the Realm so we can simulate a retry
                             realm.beginTransaction();
@@ -482,6 +516,7 @@ public class RealmAsyncQueryTests {
         assertEquals(0, realmResults.size());
 
         // 6. Callback triggered after retry has completed
+        looperThread.keepStrongReference.add(realmResults);
         realmResults.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
             @Override
             public void onChange(RealmResults<AllTypes> object) {
@@ -516,7 +551,7 @@ public class RealmAsyncQueryTests {
             @Override
             public boolean onInterceptInMessage(int what) {
                 int intercepts = numberOfIntercept.getAndIncrement();
-                if (what == HandlerController.COMPLETED_ASYNC_REALM_RESULTS && intercepts == 1) {
+                if (what == HandlerControllerConstants.COMPLETED_ASYNC_REALM_RESULTS && intercepts == 1) {
                     // 4. The first time the async queries complete we start an update from
                     // another background thread. This will cause queries to rerun when the
                     // background thread notifies this thread.
@@ -563,6 +598,9 @@ public class RealmAsyncQueryTests {
                 }
             }
         };
+
+        looperThread.keepStrongReference.add(realmResults1);
+        looperThread.keepStrongReference.add(realmResults2);
 
         realmResults1.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
             @Override
@@ -623,7 +661,7 @@ public class RealmAsyncQueryTests {
                 // Intercepts in order [QueryCompleted, RealmChanged, QueryUpdated]
                 int intercepts = numberOfIntercept.incrementAndGet();
                 switch (what) {
-                    case HandlerController.COMPLETED_ASYNC_REALM_RESULTS: {
+                    case HandlerControllerConstants.COMPLETED_ASYNC_REALM_RESULTS: {
                         // we advance the Realm so we can simulate a retry
                         if (intercepts == 1) {
                             realm.beginTransaction();
@@ -644,6 +682,8 @@ public class RealmAsyncQueryTests {
 
         assertFalse(realmResults.isLoaded());
         assertEquals(0, realmResults.size());
+
+        looperThread.keepStrongReference.add(realmResults);
 
         // Add change listener that should only be called once
         realmResults.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
@@ -681,7 +721,7 @@ public class RealmAsyncQueryTests {
             @Override
             public boolean onInterceptInMessage(int what) {
                 switch (what) {
-                    case HandlerController.REALM_CHANGED: {
+                    case HandlerControllerConstants.REALM_CHANGED: {
                         // should only intercept the first REALM_CHANGED coming from the
                         // background update thread
 
@@ -691,11 +731,11 @@ public class RealmAsyncQueryTests {
                         // upcoming REALM_CHANGED to batch update all async queries
                         return numberOfInterceptedChangeMessage.getAndIncrement() == 0;
                     }
-                    case HandlerController.COMPLETED_ASYNC_REALM_RESULTS: {
+                    case HandlerControllerConstants.COMPLETED_ASYNC_REALM_RESULTS: {
                         if (numberOfCompletedAsyncQuery.incrementAndGet() == 2) {
                             // both queries have completed now (& their results should be ignored)
                             // now send the REALM_CHANGED event that should batch update all queries
-                            sendEmptyMessage(HandlerController.REALM_CHANGED);
+                            sendEmptyMessage(HandlerControllerConstants.REALM_CHANGED);
                         }
                     }
                 }
@@ -742,6 +782,9 @@ public class RealmAsyncQueryTests {
             }
         };
 
+        looperThread.keepStrongReference.add(realmResults1);
+        looperThread.keepStrongReference.add(realmResults2);
+
         realmResults1.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
             @Override
             public void onChange(RealmResults<AllTypes> object) {
@@ -779,7 +822,7 @@ public class RealmAsyncQueryTests {
         final AllTypes asyncObj = realm.where(AllTypes.class).findFirstAsync();
         assertFalse(asyncObj.isValid());
         assertFalse(asyncObj.isLoaded());
-
+        looperThread.keepStrongReference.add(asyncObj);
         asyncObj.addChangeListener(new RealmChangeListener<AllTypes>() {
             @Override
             public void onChange(AllTypes object) {
@@ -795,6 +838,7 @@ public class RealmAsyncQueryTests {
     public void findFirstAsync_initalEmptyRow() throws Throwable {
         Realm realm = looperThread.realm;
         final AllTypes firstAsync = realm.where(AllTypes.class).findFirstAsync();
+        looperThread.keepStrongReference.add(firstAsync);
         firstAsync.addChangeListener(new RealmChangeListener<AllTypes>() {
             @Override
             public void onChange(AllTypes object) {
@@ -829,6 +873,7 @@ public class RealmAsyncQueryTests {
         assertEquals(0, firstAsync.getColumnLong());
         assertEquals("test data 0", firstAsync.getColumnString());
 
+        looperThread.keepStrongReference.add(firstAsync);
         firstAsync.addChangeListener(new RealmChangeListener<AllTypes>() {
             @Override
             public void onChange(AllTypes object) {
@@ -853,6 +898,7 @@ public class RealmAsyncQueryTests {
                 .between("columnLong", 4, 9)
                 .findFirstAsync();
 
+        looperThread.keepStrongReference.add(realmResults);
         realmResults.addChangeListener(new RealmChangeListener<AllTypes>() {
             @Override
             public void onChange(AllTypes object) {
@@ -915,7 +961,7 @@ public class RealmAsyncQueryTests {
             public boolean onInterceptInMessage(int what) {
                 int intercepts = numberOfIntercept.incrementAndGet();
                 switch (what) {
-                    case HandlerController.COMPLETED_ASYNC_REALM_OBJECT: {
+                    case HandlerControllerConstants.COMPLETED_ASYNC_REALM_OBJECT: {
                         if (intercepts == 1) {
                             // we advance the Realm so we can simulate a retry
                             realm.beginTransaction();
@@ -946,6 +992,7 @@ public class RealmAsyncQueryTests {
         }
 
         // Add change listener that should only be called once after the retry completed.
+        looperThread.keepStrongReference.add(realmResults);
         realmResults.addChangeListener(new RealmChangeListener<AllTypes>() {
             @Override
             public void onChange(AllTypes object) {
@@ -976,6 +1023,7 @@ public class RealmAsyncQueryTests {
         assertFalse(results.isLoaded());
         assertEquals(0, results.size());
 
+        looperThread.keepStrongReference.add(results);
         results.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
             @Override
             public void onChange(RealmResults<AllTypes> object) {
@@ -1011,7 +1059,7 @@ public class RealmAsyncQueryTests {
                 // In order [QueryCompleted, RealmChanged, QueryUpdated]
                 int intercepts = numberOfIntercept.incrementAndGet();
                 switch (what) {
-                    case HandlerController.COMPLETED_ASYNC_REALM_RESULTS: {
+                    case HandlerControllerConstants.COMPLETED_ASYNC_REALM_RESULTS: {
                         if (intercepts == 1) {
                             // We advance the Realm so we can simulate a retry before listeners are
                             // called.
@@ -1038,6 +1086,7 @@ public class RealmAsyncQueryTests {
         // 4. Intercepting the query completed event the first time will
         // cause a commit that should cause the findAllSortedAsync to be re-run.
         // This change listener should only be called with the final result.
+        looperThread.keepStrongReference.add(realmResults);
         realmResults.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
             @Override
             public void onChange(RealmResults<AllTypes> object) {
@@ -1074,8 +1123,8 @@ public class RealmAsyncQueryTests {
             @Override
             public boolean onInterceptInMessage(int what) {
                 switch (what) {
-                    case HandlerController.COMPLETED_ASYNC_REALM_RESULTS: {
-                        if (numberOfIntercept.incrementAndGet() == 1) {
+                    case HandlerControllerConstants.COMPLETED_ASYNC_REALM_RESULTS: {
+                        if (numberOfIntercept.incrementAndGet() == 2 /* 2 queries are both completed */) {
                             // 6. The first time the async queries complete we start an update from
                             // another background thread. This will cause queries to rerun when the
                             // background thread notifies this thread.
@@ -1130,6 +1179,9 @@ public class RealmAsyncQueryTests {
                 }
             }
         };
+
+        looperThread.keepStrongReference.add(realmResults1);
+        looperThread.keepStrongReference.add(realmResults2);
 
         realmResults1.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
             @Override
@@ -1211,7 +1263,7 @@ public class RealmAsyncQueryTests {
             @Override
             public boolean onInterceptInMessage(int what) {
                 int intercepts = numberOfIntercept.incrementAndGet();
-                if (what == HandlerController.COMPLETED_ASYNC_REALM_RESULTS && intercepts == 1) {
+                if (what == HandlerControllerConstants.COMPLETED_ASYNC_REALM_RESULTS && intercepts == 1) {
                     // 6. The first time the async queries complete we start an update from
                     // another background thread. This will cause queries to rerun when the
                     // background thread notifies this thread.
@@ -1271,6 +1323,9 @@ public class RealmAsyncQueryTests {
                 }
             }
         };
+
+        looperThread.keepStrongReference.add(realmResults1);
+        looperThread.keepStrongReference.add(realmResults2);
 
         realmResults1.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
             @Override
@@ -1481,7 +1536,7 @@ public class RealmAsyncQueryTests {
         });
         looperThread.keepStrongReference.add(allAsync);
 
-        looperThread.realm.handler.postDelayed(new Runnable() {
+        looperThread.postRunnableDelayed(new Runnable() {
             @Override
             public void run() {
                 backgroundThread.start();
@@ -1528,6 +1583,10 @@ public class RealmAsyncQueryTests {
             }
         };
 
+        looperThread.keepStrongReference.add(distinctBool);
+        looperThread.keepStrongReference.add(distinctLong);
+        looperThread.keepStrongReference.add(distinctDate);
+        looperThread.keepStrongReference.add(distinctString);
         distinctBool.addChangeListener(new RealmChangeListener<RealmResults<AnnotationIndexTypes>>() {
             @Override
             public void onChange(RealmResults<AnnotationIndexTypes> object) {
@@ -1737,6 +1796,7 @@ public class RealmAsyncQueryTests {
         final Realm realm = looperThread.realm;
 
         final RealmResults<Dog> allAsync = realm.where(Dog.class).equalTo("owner.name", "kiba").findAllAsync();
+        looperThread.keepStrongReference.add(allAsync);
         allAsync.addChangeListener(new RealmChangeListener<RealmResults<Dog>>() {
             @Override
             public void onChange(RealmResults<Dog> object) {
@@ -1796,6 +1856,7 @@ public class RealmAsyncQueryTests {
         Realm.asyncTaskExecutor.pause();
 
         final AllTypes firstAsync = looperThread.realm.where(AllTypes.class).findFirstAsync();
+        looperThread.keepStrongReference.add(firstAsync);
         firstAsync.addChangeListener(new RealmChangeListener<AllTypes>() {
             @Override
             public void onChange(AllTypes object) {
@@ -1811,8 +1872,8 @@ public class RealmAsyncQueryTests {
             public void run() {
                 Realm bgRealm = Realm.getInstance(looperThread.realmConfiguration);
                 // Advancing the Realm without generating notifications
-                bgRealm.sharedGroupManager.promoteToWrite();
-                bgRealm.sharedGroupManager.commitAndContinueAsRead();
+                bgRealm.sharedRealm.beginTransaction();
+                bgRealm.sharedRealm.commitTransaction();
                 Realm.asyncTaskExecutor.resume();
                 bgRealm.close();
                 signalClosedRealm.countDown();
@@ -1825,7 +1886,7 @@ public class RealmAsyncQueryTests {
     @Test
     @UiThreadTest
     public void badVersion_findAll() throws NoSuchFieldException, IllegalAccessException {
-        TestHelper.replaceRealmThreadExectutor(RealmThreadPoolExecutor.newSingleThreadExecutor());
+        TestHelper.replaceRealmThreadExecutor(RealmThreadPoolExecutor.newSingleThreadExecutor());
         RealmConfiguration config = configFactory.createConfiguration();
         Realm realm = Realm.getInstance(config);
         realm.executeTransactionAsync(new Realm.Transaction() {
@@ -1852,6 +1913,7 @@ public class RealmAsyncQueryTests {
         } finally {
             realm.close();
         }
+        TestHelper.resetRealmThreadExecutor();
     }
 
     // Test case for https://github.com/realm/realm-java/issues/2417
@@ -1859,7 +1921,7 @@ public class RealmAsyncQueryTests {
     @Test
     @UiThreadTest
     public void badVersion_findAllSortedAsync() throws NoSuchFieldException, IllegalAccessException {
-        TestHelper.replaceRealmThreadExectutor(RealmThreadPoolExecutor.newSingleThreadExecutor());
+        TestHelper.replaceRealmThreadExecutor(RealmThreadPoolExecutor.newSingleThreadExecutor());
         RealmConfiguration config = configFactory.createConfiguration();
         Realm realm = Realm.getInstance(config);
         realm.executeTransactionAsync(new Realm.Transaction() {
@@ -1884,6 +1946,7 @@ public class RealmAsyncQueryTests {
                 .findAllSortedAsync(AllTypes.FIELD_STRING, Sort.ASCENDING, AllTypes.FIELD_LONG, Sort.DESCENDING)
                 .load();
         realm.close();
+        TestHelper.resetRealmThreadExecutor();
     }
 
     // Test case for https://github.com/realm/realm-java/issues/2417
@@ -1891,7 +1954,7 @@ public class RealmAsyncQueryTests {
     @Test
     @UiThreadTest
     public void badVersion_distinct() throws NoSuchFieldException, IllegalAccessException {
-        TestHelper.replaceRealmThreadExectutor(RealmThreadPoolExecutor.newSingleThreadExecutor());
+        TestHelper.replaceRealmThreadExecutor(RealmThreadPoolExecutor.newSingleThreadExecutor());
         RealmConfiguration config = configFactory.createConfiguration();
         Realm realm = Realm.getInstance(config);
         realm.executeTransactionAsync(new Realm.Transaction() {
@@ -1917,6 +1980,7 @@ public class RealmAsyncQueryTests {
                 .load();
 
         realm.close();
+        TestHelper.resetRealmThreadExecutor();
     }
 
     // Test case for https://github.com/realm/realm-java/issues/2417
@@ -1924,11 +1988,12 @@ public class RealmAsyncQueryTests {
     @Test
     @RunTestInLooperThread
     public void badVersion_syncTransaction() throws NoSuchFieldException, IllegalAccessException {
-        TestHelper.replaceRealmThreadExectutor(RealmThreadPoolExecutor.newSingleThreadExecutor());
+        TestHelper.replaceRealmThreadExecutor(RealmThreadPoolExecutor.newSingleThreadExecutor());
         Realm realm = looperThread.realm;
 
         // 1. Make sure that async query is not started
         final RealmResults<AllTypes> result = realm.where(AllTypes.class).findAllSortedAsync(AllTypes.FIELD_STRING);
+        looperThread.keepStrongReference.add(result);
         result.addChangeListener(new RealmChangeListener<RealmResults<AllTypes>>() {
             @Override
             public void onChange(RealmResults<AllTypes> object) {
@@ -1949,6 +2014,7 @@ public class RealmAsyncQueryTests {
 
         // 3. The async query should now (hopefully) fail with a BadVersion
         result.load();
+        TestHelper.resetRealmThreadExecutor();
     }
 
     // handlerController#emptyAsyncRealmObject is accessed from different threads
@@ -2045,6 +2111,57 @@ public class RealmAsyncQueryTests {
         }
 
         realm.close();
+    }
+
+    // This test reproduce the issue in https://secure.helpscout.net/conversation/244053233/6163/?folderId=366141
+    // First it creates 512 async queries, then trigger a transaction to make the queries gets update with
+    // nativeBatchUpdateQueries. It should not exceed the limits of local ref map size in JNI.
+    @Test
+    @RunTestInLooperThread
+    public void batchUpdate_localRefIsDeletedInLoopOfNativeBatchUpdateQueries() {
+        final Realm realm = looperThread.realm;
+        // For Android, the size of local ref map is 512. Use 1024 for more pressure.
+        final int TEST_COUNT = 1024;
+        final AtomicBoolean updatesTriggered = new AtomicBoolean(false);
+        // The first time onChange gets called for every results.
+        final AtomicInteger firstOnChangeCounter = new AtomicInteger(0);
+        // The second time onChange gets called for every results which is triggered by the transaction.
+        final AtomicInteger secondOnChangeCounter = new AtomicInteger(0);
+
+        final RealmChangeListener<RealmResults<AllTypes>> listener = new RealmChangeListener<RealmResults<AllTypes>>() {
+            @Override
+            public void onChange(RealmResults<AllTypes> element) {
+                if (updatesTriggered.get())  {
+                    // Step 4: Test finished after all results's onChange gets called the 2nd time.
+                    int count  = secondOnChangeCounter.addAndGet(1);
+                    if (count == TEST_COUNT) {
+                        realm.removeAllChangeListeners();
+                        looperThread.testComplete();
+                    }
+                } else {
+                    int count  = firstOnChangeCounter.addAndGet(1);
+                    if (count == TEST_COUNT) {
+                        // Step 3: Commit the transaction to trigger queries updates.
+                        updatesTriggered.set(true);
+                        realm.executeTransactionAsync(new Realm.Transaction() {
+                            @Override
+                            public void execute(Realm realm) {
+                                realm.createObject(AllTypes.class);
+                            }
+                        });
+                    } else {
+                        // Step 2: Create 2nd - TEST_COUNT queries.
+                        RealmResults<AllTypes> results = realm.where(AllTypes.class).findAllAsync();
+                        results.addChangeListener(this);
+                        looperThread.keepStrongReference.add(results);
+                    }
+                }
+            }
+        };
+        // Step 1. Create first async to kick the test start.
+        RealmResults<AllTypes> results = realm.where(AllTypes.class).findAllAsync();
+        results.addChangeListener(listener);
+        looperThread.keepStrongReference.add(results);
     }
 
     // *** Helper methods ***

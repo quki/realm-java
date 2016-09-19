@@ -19,6 +19,7 @@ package io.realm;
 import android.content.Context;
 import android.content.res.AssetManager;
 import android.os.Looper;
+import android.support.test.InstrumentationRegistry;
 import android.util.Log;
 
 import org.junit.Assert;
@@ -56,9 +57,12 @@ import io.realm.entities.StringOnly;
 import io.realm.internal.Table;
 import io.realm.internal.TableOrView;
 import io.realm.internal.async.RealmThreadPoolExecutor;
-import io.realm.internal.log.Logger;
+import io.realm.log.AndroidLogger;
+import io.realm.log.LogLevel;
+import io.realm.log.Logger;
 import io.realm.rule.TestRealmConfigurationFactory;
 
+import static android.R.id.message;
 import static junit.framework.Assert.fail;
 import static org.junit.Assert.assertEquals;
 
@@ -110,9 +114,7 @@ public class TestHelper {
         t.addColumn(RealmFieldType.DOUBLE, "double");
         t.addColumn(RealmFieldType.FLOAT, "float");
         t.addColumn(RealmFieldType.INTEGER, "long");
-        t.addColumn(RealmFieldType.UNSUPPORTED_MIXED, "mixed");
         t.addColumn(RealmFieldType.STRING, "string");
-        t.addColumn(RealmFieldType.UNSUPPORTED_TABLE, "table");
 
         return t;
     }
@@ -173,7 +175,7 @@ public class TestHelper {
      * @return Logger implementation
      */
     public static Logger getFailureLogger(final int failureLevel) {
-        return new Logger() {
+        return new AndroidLogger(Log.VERBOSE) {
 
             private void failIfEqualOrAbove(int logLevel, int failureLevel) {
                 if (logLevel >= failureLevel) {
@@ -182,54 +184,35 @@ public class TestHelper {
             }
 
             @Override
-            public void v(String message) {
+            public void trace(Throwable t, String message, Object... args) {
                 failIfEqualOrAbove(Log.VERBOSE, failureLevel);
             }
 
             @Override
-            public void v(String message, Throwable t) {
-                failIfEqualOrAbove(Log.VERBOSE, failureLevel);
-            }
-
-            @Override
-            public void d(String message) {
+            public void debug(Throwable t, String message, Object... args) {
                 failIfEqualOrAbove(Log.DEBUG, failureLevel);
             }
 
             @Override
-            public void d(String message, Throwable t) {
-                failIfEqualOrAbove(Log.DEBUG, failureLevel);
-            }
-
-            @Override
-            public void i(String message) {
+            public void info(Throwable t, String message, Object... args) {
                 failIfEqualOrAbove(Log.INFO, failureLevel);
             }
 
             @Override
-            public void i(String message, Throwable t) {
-                failIfEqualOrAbove(Log.INFO, failureLevel);
-            }
-
-            @Override
-            public void w(String message) {
+            public void warn(Throwable t, String message, Object... args) {
                 failIfEqualOrAbove(Log.WARN, failureLevel);
             }
 
             @Override
-            public void w(String message, Throwable t) {
-                failIfEqualOrAbove(Log.WARN, failureLevel);
-            }
-
-            @Override
-            public void e(String message) {
+            public void error(Throwable t, String message, Object... args) {
                 failIfEqualOrAbove(Log.ERROR, failureLevel);
             }
 
             @Override
-            public void e(String message, Throwable t) {
+            public void fatal(Throwable t, String message, Object... args) {
                 failIfEqualOrAbove(Log.ERROR, failureLevel);
             }
+
         };
     }
 
@@ -247,62 +230,67 @@ public class TestHelper {
      */
     public static class TestLogger implements Logger {
 
+        private final int minimumLevel;
         public String message;
         public Throwable throwable;
 
-        @Override
-        public void v(String message) {
-            this.message = message;
+        public TestLogger() {
+            this(LogLevel.DEBUG);
+        }
+
+        public TestLogger(int minimumLevel) {
+            this.minimumLevel = minimumLevel;
         }
 
         @Override
-        public void v(String message, Throwable t) {
-            this.message = message;
+        public int getMinimumNativeDebugLevel() {
+            return minimumLevel;
+        }
+
+        @Override
+        public void trace(Throwable t, String message, Object... args) {
+            if (minimumLevel <= LogLevel.TRACE) {
+                this.message = (message != null) ? String.format(message, args) : null;
+                this.throwable = t;
+            }
+        }
+
+        @Override
+        public void debug(Throwable t, String message, Object... args) {
+            if (minimumLevel <= LogLevel.DEBUG) {
+                this.message = (message != null) ? String.format(message, args) : null;
+                this.throwable = t;
+            }
+        }
+
+        @Override
+        public void info(Throwable t, String message, Object... args) {
+            if (minimumLevel <= LogLevel.INFO) {
+                this.message = (message != null) ? String.format(message, args) : null;
+                this.throwable = t;
+            }
+        }
+
+        @Override
+        public void warn(Throwable t, String message, Object... args) {
+            this.message = (message != null) ? String.format(message, args) : null;
             this.throwable = t;
         }
 
         @Override
-        public void d(String message) {
-            this.message = message;
+        public void error(Throwable t, String message, Object... args) {
+            if (minimumLevel <= LogLevel.ERROR) {
+                this.message = (message != null) ? String.format(message, args) : null;
+                this.throwable = t;
+            }
         }
 
         @Override
-        public void d(String message, Throwable t) {
-            this.message = message;
-            this.throwable = t;
-        }
-
-        @Override
-        public void i(String message) {
-            this.message = message;
-        }
-
-        @Override
-        public void i(String message, Throwable t) {
-            this.message = message;
-            this.throwable = t;
-        }
-
-        @Override
-        public void w(String message) {
-            this.message = message;
-        }
-
-        @Override
-        public void w(String message, Throwable t) {
-            this.message = message;
-            this.throwable = t;
-        }
-
-        @Override
-        public void e(String message) {
-            this.message = message;
-        }
-
-        @Override
-        public void e(String message, Throwable t) {
-            this.message = message;
-            this.throwable = t;
+        public void fatal(Throwable t, String message, Object... args) {
+            if (minimumLevel <= LogLevel.FATAL) {
+                this.message = (message != null) ? String.format(message, args) : null;
+                this.throwable = t;
+            }
         }
     }
 
@@ -384,7 +372,9 @@ public class TestHelper {
      */
     @Deprecated
     public static RealmConfiguration createConfiguration(File dir, String name, byte[] key) {
-        RealmConfiguration.Builder config = new RealmConfiguration.Builder(dir).name(name);
+        RealmConfiguration.Builder config = new RealmConfiguration.Builder(InstrumentationRegistry.getTargetContext())
+                .directory(dir)
+                .name(name);
         if (key != null) {
             config.encryptionKey(key);
         }
@@ -885,8 +875,6 @@ public class TestHelper {
             // used. Any exception in the `after()` code will mask the original error.
             TestHelper.awaitOrFail(signalTestFinished);
         } finally {
-            // close the executor
-            executorService.shutdownNow();
             if (looper[0] != null) {
                 // failing to quit the looper will not execute the finally block responsible
                 // of closing the Realm
@@ -895,6 +883,9 @@ public class TestHelper {
 
             // wait for the finally block to execute & close the Realm
             TestHelper.awaitOrFail(signalClosedRealm);
+            // Close the executor.
+            // This needs to be called after waiting since it might interrupt waitRealmThreadExecutorFinish().
+            executorService.shutdownNow();
 
             if (throwable[0] != null) {
                 // throw any assertion errors happened in the background thread
@@ -946,18 +937,109 @@ public class TestHelper {
         }
     }
 
+    public static void testNoObjectFound(
+            Realm realm,
+            Class<? extends RealmModel> clazz,
+            String fieldName, Object value) {
+        testObjectCount(realm, 0L, clazz, fieldName, value);
+    }
+
+    public static void testOneObjectFound(
+            Realm realm,
+            Class<? extends RealmModel> clazz,
+            String fieldName, Object value) {
+        testObjectCount(realm, 1L, clazz, fieldName, value);
+    }
+
+    public static void testObjectCount(
+            Realm realm,
+            long expectedCount,
+            Class<? extends RealmModel> clazz,
+            String fieldName, Object value) {
+        final RealmQuery<? extends RealmModel> query;
+        switch (value.getClass().getSimpleName()) {
+            case "String":
+                query = realm.where(clazz).equalTo(fieldName, (String) value);
+                break;
+            case "Byte":
+                query = realm.where(clazz).equalTo(fieldName, (Byte) value);
+                break;
+            case "Short":
+                query = realm.where(clazz).equalTo(fieldName, (Short) value);
+                break;
+            case "Integer":
+                query = realm.where(clazz).equalTo(fieldName, (Integer) value);
+                break;
+            case "Long":
+                query = realm.where(clazz).equalTo(fieldName, (Long) value);
+                break;
+            case "Float":
+                query = realm.where(clazz).equalTo(fieldName, (Float) value);
+                break;
+            case "Double":
+                query = realm.where(clazz).equalTo(fieldName, (Double) value);
+                break;
+            case "Boolean":
+                query = realm.where(clazz).equalTo(fieldName, (Boolean) value);
+                break;
+            case "Date":
+                query = realm.where(clazz).equalTo(fieldName, (Date) value);
+                break;
+            case "byte[]":
+                query = realm.where(clazz).equalTo(fieldName, (byte[]) value);
+                break;
+            default:
+                throw new AssertionError("unknown type: " + value.getClass().getSimpleName());
+        }
+
+        assertEquals(expectedCount, query.count());
+    }
+
     /**
      * Replaces the current thread executor with a another one for testing.
      * WARNING: This method should only be called before any async tasks have been started.
+     *          Call {@link #resetRealmThreadExecutor()} before test return to reset the excutor to default.
      *
      * @param executor {@link RealmThreadPoolExecutor} that should replace the current one
      */
-    public static RealmThreadPoolExecutor replaceRealmThreadExectutor(RealmThreadPoolExecutor executor) throws NoSuchFieldException, IllegalAccessException {
+    public static RealmThreadPoolExecutor replaceRealmThreadExecutor(RealmThreadPoolExecutor executor)
+            throws NoSuchFieldException, IllegalAccessException {
         Field field = BaseRealm.class.getDeclaredField("asyncTaskExecutor");
         field.setAccessible(true);
         RealmThreadPoolExecutor oldExecutor = (RealmThreadPoolExecutor) field.get(null);
         field.set(field, executor);
         return oldExecutor;
+    }
+
+    /**
+     * This will first wait for finishing all tasks in BaseRealm.asyncTaskExecutor, throws if time out.
+     * Then reset the BaseRealm.asyncTaskExecutor to the default value.
+     *
+     * @throws NoSuchFieldException
+     * @throws IllegalAccessException
+     */
+    public static void resetRealmThreadExecutor() throws NoSuchFieldException, IllegalAccessException {
+        waitRealmThreadExecutorFinish();
+        replaceRealmThreadExecutor(RealmThreadPoolExecutor.newDefaultExecutor());
+    }
+
+    /**
+     * Wait and check if all tasks in BaseRealm.asyncTaskExecutor can be finished in 5 seconds, otherwise fail the test.
+     */
+    public static void waitRealmThreadExecutorFinish() {
+        int counter = 50;
+        while (counter > 0) {
+            if (BaseRealm.asyncTaskExecutor.getActiveCount() == 0) {
+                return;
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                fail(e.getMessage());
+            }
+            counter--;
+        }
+        fail("'BaseRealm.asyncTaskExecutor' is not finished in " + counter/10 + " seconds");
     }
 
     /**

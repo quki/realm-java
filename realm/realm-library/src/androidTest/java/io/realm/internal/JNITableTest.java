@@ -16,30 +16,42 @@
 
 package io.realm.internal;
 
-import android.test.AndroidTestCase;
+import android.support.test.runner.AndroidJUnit4;
 
-import java.io.File;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
 import java.util.Date;
 
+import io.realm.Realm;
+import io.realm.RealmConfiguration;
 import io.realm.RealmFieldType;
-import io.realm.Sort;
 import io.realm.TestHelper;
+import io.realm.rule.TestRealmConfigurationFactory;
 
-public class JNITableTest extends AndroidTestCase {
+import static junit.framework.Assert.assertEquals;
+import static junit.framework.Assert.assertFalse;
+import static junit.framework.Assert.assertNotNull;
+import static junit.framework.Assert.assertNull;
+import static junit.framework.Assert.assertTrue;
+import static junit.framework.Assert.fail;
 
-    Table t;
+@RunWith(AndroidJUnit4.class)
+public class JNITableTest {
+    @Rule
+    public final TestRealmConfigurationFactory configFactory = new TestRealmConfigurationFactory();
 
-    Table createTestTable() {
-        Table t = new Table();
-        return t;
-    }
+    private Table t;
 
-    @Override
+    @Before
     public void setUp() {
-        t = createTestTable();
+        t = new Table();
     }
 
-    public void testTableToString() {
+    @Test
+    public void tableToString() {
         Table t = new Table();
 
         t.addColumn(RealmFieldType.STRING, "stringCol");
@@ -49,15 +61,12 @@ public class JNITableTest extends AndroidTestCase {
         t.add("s1", 1, true);
         t.add("s2", 2, false);
 
-        String expected =
-"    stringCol  intCol  boolCol\n" +
-"0:  s1              1     true\n" +
-"1:  s2              2    false\n" ;
-
+        String expected = "The Table contains 3 columns: stringCol, intCol, boolCol. And 2 rows.";
         assertEquals(expected, t.toString());
     }
 
-    public void testRowOperationsOnZeroRow(){
+    @Test
+    public void rowOperationsOnZeroRow(){
 
         Table t = new Table();
         // Remove rows without columns
@@ -71,7 +80,8 @@ public class JNITableTest extends AndroidTestCase {
 
     }
 
-    public void testZeroColOperations() {
+    @Test
+    public void zeroColOperations() {
         Table tableZeroCols = new Table();
 
         // Add rows
@@ -87,25 +97,26 @@ public class JNITableTest extends AndroidTestCase {
         try { tableZeroCols.renameColumn(10, "newName");    fail("No columns in table"); } catch (ArrayIndexOutOfBoundsException ignored) {}
     }
 
-    public void testFindFirstNonExisting() {
+    @Test
+    public void findFirstNonExisting() {
         Table t = TestHelper.getTableWithAllColumnTypes();
-        t.add(new byte[]{1, 2, 3}, true, new Date(1384423149761l), 4.5d, 5.7f, 100, new Mixed("mixed"), "string", null);
+        t.add(new byte[]{1, 2, 3}, true, new Date(1384423149761L), 4.5d, 5.7f, 100, "string");
 
         assertEquals(-1, t.findFirstBoolean(1, false));
         // FIXME: reenable when core implements find_first_timestamp(): assertEquals(-1, t.findFirstDate(2, new Date(138442314986l)));
         assertEquals(-1, t.findFirstDouble(3, 1.0d));
         assertEquals(-1, t.findFirstFloat(4, 1.0f));
         assertEquals(-1, t.findFirstLong(5, 50));
-        assertEquals(-1, t.findFirstString(7, "other string"));
     }
 
-    public void testFindFirst() {
+    @Test
+    public void findFirst() {
         final int TEST_SIZE = 10;
         Table t = TestHelper.getTableWithAllColumnTypes();
         for (int i = 0; i < TEST_SIZE; i++) {
-            t.add(new byte[]{1,2,3}, true, new Date(i), (double)i, (float)i, i, new Mixed("mixed " + i), "string " + i, null);
+            t.add(new byte[]{1,2,3}, true, new Date(i), (double)i, (float)i, i, "string " + i);
         }
-        t.add(new byte[]{1, 2, 3}, true, new Date(TEST_SIZE), (double) TEST_SIZE, (float) TEST_SIZE, TEST_SIZE, new Mixed("mixed " + TEST_SIZE), "", null);
+        t.add(new byte[]{1, 2, 3}, true, new Date(TEST_SIZE), (double) TEST_SIZE, (float) TEST_SIZE, TEST_SIZE, "");
 
         assertEquals(0, t.findFirstBoolean(1, true));
         for (int i = 0; i < TEST_SIZE; i++) {
@@ -113,13 +124,10 @@ public class JNITableTest extends AndroidTestCase {
             assertEquals(i, t.findFirstDouble(3, (double) i));
             assertEquals(i, t.findFirstFloat(4, (float) i));
             assertEquals(i, t.findFirstLong(5, i));
-            assertEquals(i, t.findFirstString(7, "string " + i));
         }
 
-        assertEquals(TEST_SIZE, t.findFirstString(7, ""));
-
         try {
-            t.findFirstString(7, null);
+            t.findFirstString(6, null);
             fail();
         } catch (IllegalArgumentException ignored) {}
 
@@ -129,8 +137,8 @@ public class JNITableTest extends AndroidTestCase {
         } catch (IllegalArgumentException ignored) {}
     }
 
-
-    public void testGetValuesFromNonExistingColumn() {
+    @Test
+    public void getValuesFromNonExistingColumn() {
         Table t = TestHelper.getTableWithAllColumnTypes();
         t.addEmptyRows(10);
 
@@ -158,21 +166,13 @@ public class JNITableTest extends AndroidTestCase {
         try { t.getLong(-10, 0);                    fail("Column is less than 0"); } catch (ArrayIndexOutOfBoundsException ignored) { }
         try { t.getLong(9, 0);                      fail("Column does not exist"); } catch (ArrayIndexOutOfBoundsException ignored) { }
 
-        try { t.getMixed(-1, 0);                    fail("Column is less than 0"); } catch (ArrayIndexOutOfBoundsException ignored) { }
-        try { t.getMixed(-10, 0);                   fail("Column is less than 0"); } catch (ArrayIndexOutOfBoundsException ignored) { }
-        try { t.getMixed(9, 0);                     fail("Column does not exist"); } catch (ArrayIndexOutOfBoundsException ignored) { }
-
         try { t.getString(-1, 0);                   fail("Column is less than 0"); } catch (ArrayIndexOutOfBoundsException ignored) { }
         try { t.getString(-10, 0);                  fail("Column is less than 0"); } catch (ArrayIndexOutOfBoundsException ignored) { }
         try { t.getString(9, 0);                    fail("Column does not exist"); } catch (ArrayIndexOutOfBoundsException ignored) { }
-
-        try { t.getSubtable(-1, 0);                 fail("Column is less than 0"); } catch (ArrayIndexOutOfBoundsException ignored) { }
-        try { t.getSubtable(-10, 0);                fail("Column is less than 0"); } catch (ArrayIndexOutOfBoundsException ignored) { }
-        try { t.getSubtable(9, 0);                  fail("Column does not exist"); } catch (ArrayIndexOutOfBoundsException ignored) { }
-
     }
 
-    public void testGetNonExistingColumn() {
+    @Test
+    public void getNonExistingColumn() {
         Table t = new Table();
         t.addColumn(RealmFieldType.INTEGER, "int");
 
@@ -180,152 +180,45 @@ public class JNITableTest extends AndroidTestCase {
         try { t.getColumnIndex(null); fail("column name null"); } catch (IllegalArgumentException ignored) { }
     }
 
-
-    public void testGetSortedView() {
-        Table t = new Table();
-        t.addColumn(RealmFieldType.INTEGER, "");
-        t.addColumn(RealmFieldType.STRING, "");
-        t.addColumn(RealmFieldType.DOUBLE, "");
-
-        t.add(1, "s", 1000d);
-        t.add(3,"sss", 10d);
-        t.add(2, "ss", 100d);
-
-
-        // Check the order is as it is added
-        assertEquals(1, t.getLong(0, 0));
-        assertEquals(3, t.getLong(0, 1));
-        assertEquals(2, t.getLong(0, 2));
-        assertEquals("s", t.getString(1, 0));
-        assertEquals("sss", t.getString(1, 1));
-        assertEquals("ss", t.getString(1, 2));
-        assertEquals(1000d, t.getDouble(2, 0));
-        assertEquals(10d, t.getDouble(2, 1));
-        assertEquals(100d, t.getDouble(2, 2));
-
-        // Get the sorted view on first column
-        TableView v = t.getSortedView(0);
-
-        // Check the new order
-        assertEquals(1, v.getLong(0, 0));
-        assertEquals(2, v.getLong(0, 1));
-        assertEquals(3, v.getLong(0, 2));
-        assertEquals("s", v.getString(1, 0));
-        assertEquals("ss", v.getString(1, 1));
-        assertEquals("sss", v.getString(1, 2));
-        assertEquals(1000d, v.getDouble(2, 0));
-        assertEquals(100d, v.getDouble(2, 1));
-        assertEquals(10d, v.getDouble(2, 2));
-
-        // Get the sorted view on first column descending
-        v = t.getSortedView(0, Sort.DESCENDING);
-
-        // Check the new order
-        assertEquals(3, v.getLong(0, 0));
-        assertEquals(2, v.getLong(0, 1));
-        assertEquals(1, v.getLong(0, 2));
-        assertEquals("sss", v.getString(1, 0));
-        assertEquals("ss", v.getString(1, 1));
-        assertEquals("s", v.getString(1, 2));
-        assertEquals(10d, v.getDouble(2, 0));
-        assertEquals(100d, v.getDouble(2, 1));
-        assertEquals(1000d, v.getDouble(2, 2));
-
-        // Some out of bounds test cases
-        try { t.getSortedView(-1, Sort.DESCENDING);    fail("Column is less than 0"); } catch (ArrayIndexOutOfBoundsException ignored) { }
-        try { t.getSortedView(-100, Sort.DESCENDING);  fail("Column is less than 0"); } catch (ArrayIndexOutOfBoundsException ignored) { }
-        try { t.getSortedView(100, Sort.DESCENDING);   fail("Column does not exist"); } catch (ArrayIndexOutOfBoundsException ignored) { }
-
-    }
-
-    public void testSetNulls() {
+    @Test
+    public void setNulls() {
         Table t = new Table();
         t.addColumn(RealmFieldType.STRING, "");
         t.addColumn(RealmFieldType.DATE, "");
-        t.addColumn(RealmFieldType.UNSUPPORTED_MIXED, "");
         t.addColumn(RealmFieldType.BINARY, "");
-        t.add("String val", new Date(), new Mixed(""), new byte[]{1, 2, 3});
+        t.add("String val", new Date(), new byte[]{1, 2, 3});
 
         try { t.setString(0, 0, null);  fail("null string not allowed"); } catch (IllegalArgumentException ignored) { }
         try { t.setDate(1, 0, null);    fail("null Date not allowed"); } catch (IllegalArgumentException ignored) { }
     }
 
-    public void testAddNegativeEmptyRows() {
+    @Test
+    public void addNegativeEmptyRows() {
         Table t = new Table();
         t.addColumn(RealmFieldType.STRING, "colName");
 
         try { t.addEmptyRows(-1); fail("Argument is negative"); } catch (IllegalArgumentException ignored) { }
     }
 
-    public void testAddNullInMixedColumn() {
-        Table t = new Table();
-        t.addColumn(RealmFieldType.UNSUPPORTED_MIXED, "mixed");
-        t.add(new Mixed(true));
+    @Test
+    public void getName() {
+        String TABLE_NAME = "tableName";
+        RealmConfiguration configuration = configFactory.createConfiguration();
+        Realm.deleteRealm(configuration);
 
-        try { t.setMixed(0, 0, null); fail("Argument is null"); } catch (IllegalArgumentException ignored) { }
-    }
-
-    public void testImmutableInsertNotAllowed() {
-
-        String FILENAME = new File(this.getContext().getFilesDir(), "only-test-file.realm").toString();
-        String TABLENAME = "tableName";
-
-        new File(FILENAME).delete();
-        new File(FILENAME+".lock").delete();
-        SharedGroup group = new SharedGroup(FILENAME);
+        SharedRealm sharedRealm = SharedRealm.getInstance(configuration);
 
         // Write transaction must be run so we are sure a db exists with the correct table
-        WriteTransaction wt = group.beginWrite();
-        try {
-            Table table = wt.getTable(TABLENAME);
-            table.addColumn(RealmFieldType.STRING, "col0");
-            table.add("value0");
-            table.add("value1");
-            table.add("value2");
+        sharedRealm.beginTransaction();
+        sharedRealm.getTable(TABLE_NAME);
+        sharedRealm.commitTransaction();
 
-            wt.commit();
-        } catch (Throwable t) {
-            wt.rollback();
-        }
-
-        ReadTransaction rt = group.beginRead();
-        try {
-            Table table = rt.getTable(TABLENAME);
-
-            try {
-                table.addEmptyRow();
-                fail("Exception expected when inserting in read transaction");
-            } catch (IllegalStateException ignored) {
-            }
-
-        } finally {
-            rt.endRead();
-        }
+        Table table = sharedRealm.getTable(TABLE_NAME);
+        assertEquals(TABLE_NAME, table.getName());
     }
 
-    public void testGetName() {
-        String FILENAME = new File(this.getContext().getFilesDir(), "only-test-file.realm").toString();
-        String TABLENAME = "tableName";
-
-        new File(FILENAME).delete();
-        new File(FILENAME+".lock").delete();
-        SharedGroup group = new SharedGroup(FILENAME);
-
-        // Write transaction must be run so we are sure a db exists with the correct table
-        WriteTransaction wt = group.beginWrite();
-        try {
-            wt.getTable(TABLENAME);
-            wt.commit();
-        } catch (Throwable t) {
-            wt.rollback();
-        }
-
-        ReadTransaction rt = group.beginRead();
-        Table table = rt.getTable(TABLENAME);
-        assertEquals(TABLENAME, table.getName());
-    }
-
-    public void testShouldThrowWhenSetIndexOnWrongRealmFieldType() {
+    @Test
+    public void shouldThrowWhenSetIndexOnWrongRealmFieldType() {
         for (long colIndex = 0; colIndex < t.getColumnCount(); colIndex++) {
 
             // All types supported addSearchIndex and removeSearchIndex
@@ -360,13 +253,15 @@ public class JNITableTest extends AndroidTestCase {
         }
     }
 
-    public void testColumnName() {
+    @Test
+    public void columnName() {
         Table t = new Table();
         try { t.addColumn(RealmFieldType.STRING, "I am 64 characters.............................................."); fail("Only 63 characters supported"); } catch (IllegalArgumentException ignored) { }
         t.addColumn(RealmFieldType.STRING, "I am 63 characters.............................................");
     }
 
-    public void testTableNumbers() {
+    @Test
+    public void tableNumbers() {
         Table t = new Table();
         t.addColumn(RealmFieldType.INTEGER, "intCol");
         t.addColumn(RealmFieldType.DOUBLE, "doubleCol");
@@ -412,7 +307,8 @@ public class JNITableTest extends AndroidTestCase {
         assertEquals(3000.0f, t.getFloat(2, 5));
     }
 
-    public void testMaximumDate() {
+    @Test
+    public void maximumDate() {
 
         Table table = new Table();
         table.addColumn(RealmFieldType.DATE, "date");
@@ -425,7 +321,8 @@ public class JNITableTest extends AndroidTestCase {
 
     }
 
-    public void testMinimumDate() {
+    @Test
+    public void minimumDate() {
 
         Table table = new Table();
         table.addColumn(RealmFieldType.DATE, "date");
@@ -439,7 +336,8 @@ public class JNITableTest extends AndroidTestCase {
     }
 
     // testing the migration of a string column to be nullable.
-    public void testConvertToNullable() {
+    @Test
+    public void convertToNullable() {
         RealmFieldType[] columnTypes = {RealmFieldType.BOOLEAN, RealmFieldType.DATE, RealmFieldType.DOUBLE,
                 RealmFieldType.FLOAT, RealmFieldType.INTEGER, RealmFieldType.BINARY, RealmFieldType.STRING};
         for (RealmFieldType columnType : columnTypes) {
@@ -514,7 +412,8 @@ public class JNITableTest extends AndroidTestCase {
         }
     }
 
-    public void testConvertToNotNullable() {
+    @Test
+    public void convertToNotNullable() {
         RealmFieldType[] columnTypes = {RealmFieldType.BOOLEAN, RealmFieldType.DATE, RealmFieldType.DOUBLE,
                 RealmFieldType.FLOAT, RealmFieldType.INTEGER, RealmFieldType.BINARY, RealmFieldType.STRING};
         for (RealmFieldType columnType : columnTypes) {
@@ -604,19 +503,9 @@ public class JNITableTest extends AndroidTestCase {
         }
     }
 
-    // migrating an mixed column to be nullable is not supported
-    public void testConvertMixedToNullable() {
-        Table table = new Table();
-        table.addColumn(RealmFieldType.UNSUPPORTED_MIXED, "mixed", Table.NOT_NULLABLE);
-        try {
-            table.convertColumnToNullable(0);
-            fail();
-        } catch (IllegalArgumentException ignored) {
-        }
-    }
-
     // add column and read back if it is nullable or not
-    public void testIsNullable() {
+    @Test
+    public void isNullable() {
         Table table = new Table();
         table.addColumn(RealmFieldType.STRING, "string1", Table.NOT_NULLABLE);
         table.addColumn(RealmFieldType.STRING, "string2", Table.NULLABLE);

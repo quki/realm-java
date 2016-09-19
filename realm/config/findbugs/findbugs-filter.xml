@@ -8,21 +8,6 @@
         <Class name="~.*\.Manifest\$.*"/>
     </Match>
     <Match>
-        <Class name="io.realm.internal.ImplicitTransaction" />
-        <Method name="finalize" />
-        <Bug pattern="FI_NULLIFY_SUPER" />
-    </Match>
-    <Match>
-        <Class name="io.realm.internal.ReadTransaction" />
-        <Method name="finalize" />
-        <Bug pattern="FI_NULLIFY_SUPER" />
-    </Match>
-    <Match>
-        <Class name="io.realm.internal.WriteTransaction" />
-        <Method name="finalize" />
-        <Bug pattern="FI_NULLIFY_SUPER" />
-    </Match>
-    <Match>
         <Class name="io.realm.Realm" />
         <Method name="checkHasPrimaryKey" />
         <Bug pattern="UPM_UNCALLED_PRIVATE_METHOD" />

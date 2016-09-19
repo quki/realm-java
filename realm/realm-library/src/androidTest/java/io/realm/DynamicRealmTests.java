@@ -23,6 +23,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 
 import java.util.Date;
@@ -39,7 +40,9 @@ import io.realm.entities.PrimaryKeyAsBoxedInteger;
 import io.realm.entities.PrimaryKeyAsBoxedLong;
 import io.realm.entities.PrimaryKeyAsBoxedShort;
 import io.realm.entities.PrimaryKeyAsString;
-import io.realm.internal.log.RealmLog;
+import io.realm.exceptions.RealmException;
+import io.realm.internal.HandlerControllerConstants;
+import io.realm.log.RealmLog;
 import io.realm.rule.RunInLooperThread;
 import io.realm.rule.RunTestInLooperThread;
 import io.realm.rule.TestRealmConfigurationFactory;
@@ -57,6 +60,9 @@ public class DynamicRealmTests {
 
     @Rule
     public final TestRealmConfigurationFactory configFactory = new TestRealmConfigurationFactory();
+
+    @Rule
+    public final ExpectedException thrown = ExpectedException.none();
 
     private RealmConfiguration defaultConfig;
     private DynamicRealm realm;
@@ -228,6 +234,12 @@ public class DynamicRealmTests {
         realm.createObject(DogPrimaryKey.CLASS_NAME, "bar");
     }
 
+    @Test(expected = RealmException.class)
+    public void createObject_absentPrimaryKeyThrows() {
+        realm.beginTransaction();
+        realm.createObject(DogPrimaryKey.CLASS_NAME);
+    }
+
     @Test
     public void where() {
         realm.beginTransaction();
@@ -337,6 +349,7 @@ public class DynamicRealmTests {
                 .between(AllTypes.FIELD_LONG, 4, 9)
                 .findFirstAsync();
         assertFalse(allTypes.isLoaded());
+        looperThread.keepStrongReference.add(allTypes);
         allTypes.addChangeListener(new RealmChangeListener<DynamicRealmObject>() {
             @Override
             public void onChange(DynamicRealmObject object) {
@@ -395,11 +408,12 @@ public class DynamicRealmTests {
         });
     }
 
-    // Initialize a Dynamic Realm used by the *Async tests.
+    // Initialize a Dynamic Realm used by the *Async tests and keep it ref in the looperThread.
     private DynamicRealm initializeDynamicRealm() {
         RealmConfiguration defaultConfig = looperThread.realmConfiguration;
         final DynamicRealm dynamicRealm = DynamicRealm.getInstance(defaultConfig);
         populateTestRealm(dynamicRealm, 10);
+        looperThread.keepStrongReference.add(dynamicRealm);
         return dynamicRealm;
     }
 
@@ -521,7 +535,7 @@ public class DynamicRealmTests {
             @Override
             public boolean onInterceptInMessage(int what) {
                 switch (what) {
-                    case HandlerController.COMPLETED_ASYNC_REALM_OBJECT: {
+                    case HandlerControllerConstants.COMPLETED_ASYNC_REALM_OBJECT: {
                         post(new Runnable() {
                             @Override
                             public void run() {
@@ -660,5 +674,19 @@ public class DynamicRealmTests {
                 }
             }
         });
+    }
+
+    @Test
+    public void equalTo_noFieldObjectShouldThrow() {
+        final String className = "NoField";
+        RealmConfiguration emptyConfig = configFactory.createConfiguration("empty");
+        DynamicRealm dynamicRealm = DynamicRealm.getInstance(emptyConfig);
+        dynamicRealm.beginTransaction();
+        dynamicRealm.getSchema().create(className);
+        dynamicRealm.commitTransaction();
+
+        thrown.expect(IllegalArgumentException.class);
+        thrown.expectMessage("Field 'nonExisting' does not exist.");
+        dynamicRealm.where(className).equalTo("nonExisting", 1);
     }
 }

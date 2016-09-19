@@ -37,6 +37,15 @@ import io.realm.entities.CyclicType;
 import io.realm.entities.Dog;
 import io.realm.entities.NullTypes;
 import io.realm.entities.Owner;
+import io.realm.entities.PrimaryKeyAsBoxedByte;
+import io.realm.entities.PrimaryKeyAsBoxedInteger;
+import io.realm.entities.PrimaryKeyAsBoxedLong;
+import io.realm.entities.PrimaryKeyAsBoxedShort;
+import io.realm.entities.PrimaryKeyAsByte;
+import io.realm.entities.PrimaryKeyAsInteger;
+import io.realm.entities.PrimaryKeyAsLong;
+import io.realm.entities.PrimaryKeyAsShort;
+import io.realm.entities.PrimaryKeyAsString;
 import io.realm.exceptions.RealmException;
 import io.realm.rule.TestRealmConfigurationFactory;
 
@@ -68,7 +77,7 @@ public class DynamicRealmObjectTests {
         RealmConfiguration realmConfig = configFactory.createConfiguration();
         realm = Realm.getInstance(realmConfig);
         realm.beginTransaction();
-        typedObj = realm.createObject(AllJavaTypes.class);
+        typedObj = realm.createObject(AllJavaTypes.class, 1);
         typedObj.setFieldString("str");
         typedObj.setFieldShort((short) 1);
         typedObj.setFieldInt(1);
@@ -122,6 +131,11 @@ public class DynamicRealmObjectTests {
         new DynamicRealmObject(typedObj);
     }
 
+    @Test (expected = IllegalArgumentException.class)
+    public void constructor_unmanagedObjectThrows() {
+        new DynamicRealmObject(new AllTypes());
+    }
+
     // Test that all getters fail if given invalid field name
     @Test
     public void typedGetter_illegalFieldNameThrows() {
@@ -139,6 +153,22 @@ public class DynamicRealmObjectTests {
             try {
                 callGetter(type, args);
                 fail();
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+    }
+
+    @Test
+    public void typedGetter_wrongUnderlyingTypeThrows() {
+        for (SupportedType type : SupportedType.values()) {
+            try {
+                // Make sure we hit the wrong underlying type for all types.
+                if (type == SupportedType.DOUBLE) {
+                    callGetter(type, Arrays.asList(AllJavaTypes.FIELD_STRING));
+                } else {
+                    callGetter(type, Arrays.asList(AllJavaTypes.FIELD_DOUBLE));
+                }
+                fail(type + " failed to throw.");
             } catch (IllegalArgumentException ignored) {
             }
         }
@@ -186,6 +216,69 @@ public class DynamicRealmObjectTests {
         }
     }
 
+    @Test
+    public void typedSetter_wrongUnderlyingTypeThrows() {
+        for (SupportedType type : SupportedType.values()) {
+            realm.beginTransaction();
+            try {
+                // Make sure we hit the wrong underlying type for all types.
+                if (type == SupportedType.STRING) {
+                    callSetter(type, Arrays.asList(AllJavaTypes.FIELD_BOOLEAN));
+                } else {
+                    callSetter(type, Arrays.asList(AllJavaTypes.FIELD_STRING));
+                }
+                fail();
+            } catch (IllegalArgumentException ignored) {
+            } finally {
+                realm.cancelTransaction();
+            }
+        }
+    }
+
+    private void callSetterOnPrimaryKey(String className, DynamicRealmObject object) {
+        switch (className) {
+            case PrimaryKeyAsByte.CLASS_NAME:
+                object.setByte(PrimaryKeyAsByte.FIELD_ID, (byte) 42);
+                break;
+            case PrimaryKeyAsShort.CLASS_NAME:
+                object.setShort(PrimaryKeyAsShort.FIELD_ID, (short) 42);
+                break;
+            case PrimaryKeyAsInteger.CLASS_NAME:
+                object.setInt(PrimaryKeyAsInteger.FIELD_ID, 42);
+                break;
+            case PrimaryKeyAsLong.CLASS_NAME:
+                object.setLong(PrimaryKeyAsLong.FIELD_ID, 42);
+                break;
+            case PrimaryKeyAsString.CLASS_NAME:
+                object.setString(PrimaryKeyAsString.FIELD_PRIMARY_KEY, "42");
+                break;
+            default:
+                fail();
+        }
+    }
+
+    @Test
+    public void typedSetter_changePrimaryKeyThrows() {
+        final String[] primaryKeyClasses = {PrimaryKeyAsByte.CLASS_NAME, PrimaryKeyAsShort.CLASS_NAME,
+                PrimaryKeyAsInteger.CLASS_NAME, PrimaryKeyAsLong.CLASS_NAME, PrimaryKeyAsString.CLASS_NAME};
+        for (String pkClass : primaryKeyClasses) {
+            dynamicRealm.beginTransaction();
+            DynamicRealmObject object;
+            if (pkClass.equals(PrimaryKeyAsString.CLASS_NAME)) {
+                object = dynamicRealm.createObject(pkClass, "");
+            } else {
+                object = dynamicRealm.createObject(pkClass, 0);
+            }
+
+            try {
+                callSetterOnPrimaryKey(pkClass, object);
+                fail();
+            } catch (IllegalArgumentException ignored) {
+            }
+            dynamicRealm.cancelTransaction();
+        }
+    }
+
     // Helper method for calling setters with different field names
     private void callSetter(SupportedType type, List<String> fieldNames) {
         for (String fieldName : fieldNames) {
@@ -212,7 +305,7 @@ public class DynamicRealmObjectTests {
     @Test
     public void typedGettersAndSetters() {
         realm.beginTransaction();
-        AllJavaTypes obj = realm.createObject(AllJavaTypes.class);
+        AllJavaTypes obj = realm.createObject(AllJavaTypes.class, 0);
         DynamicRealmObject dObj = new DynamicRealmObject(obj);
         try {
             for (SupportedType type : SupportedType.values()) {
@@ -276,7 +369,7 @@ public class DynamicRealmObjectTests {
     @Test
     public void setter_null() {
         realm.beginTransaction();
-        NullTypes obj = realm.createObject(NullTypes.class);
+        NullTypes obj = realm.createObject(NullTypes.class, 0);
         DynamicRealmObject dObj = new DynamicRealmObject(obj);
         try {
             for (SupportedType type : SupportedType.values()) {
@@ -349,7 +442,7 @@ public class DynamicRealmObjectTests {
     @Test
     public void setter_nullOnRequiredFieldsThrows() {
         realm.beginTransaction();
-        NullTypes obj = realm.createObject(NullTypes.class);
+        NullTypes obj = realm.createObject(NullTypes.class, 0);
         DynamicRealmObject dObj = new DynamicRealmObject(obj);
         try {
             for (SupportedType type : SupportedType.values()) {
@@ -383,7 +476,7 @@ public class DynamicRealmObjectTests {
     @Test
     public void typedSetter_null() {
         realm.beginTransaction();
-        NullTypes obj = realm.createObject(NullTypes.class);
+        NullTypes obj = realm.createObject(NullTypes.class, 0);
         DynamicRealmObject dObj = new DynamicRealmObject(obj);
         try {
             for (SupportedType type : SupportedType.values()) {
@@ -427,6 +520,29 @@ public class DynamicRealmObjectTests {
     }
 
     @Test
+    public void setNull_changePrimaryKeyThrows() {
+        final String[] primaryKeyClasses = {PrimaryKeyAsBoxedByte.CLASS_NAME, PrimaryKeyAsBoxedShort.CLASS_NAME,
+                PrimaryKeyAsBoxedInteger.CLASS_NAME, PrimaryKeyAsBoxedLong.CLASS_NAME, PrimaryKeyAsString.CLASS_NAME};
+        for (String pkClass : primaryKeyClasses) {
+            dynamicRealm.beginTransaction();
+            DynamicRealmObject object;
+            boolean isStringPK = pkClass.equals(PrimaryKeyAsString.CLASS_NAME);
+            if (isStringPK) {
+                object = dynamicRealm.createObject(pkClass, "");
+            } else {
+                object = dynamicRealm.createObject(pkClass, 0);
+            }
+
+            try {
+                object.setNull(isStringPK ? PrimaryKeyAsString.FIELD_PRIMARY_KEY : "id");
+                fail();
+            } catch (IllegalArgumentException ignored) {
+            }
+            dynamicRealm.cancelTransaction();
+        }
+    }
+
+    @Test
     public void setObject_differentType() {
         realm.beginTransaction();
         DynamicRealmObject dog = new DynamicRealmObject(realm.createObject(Dog.class));
@@ -443,7 +559,7 @@ public class DynamicRealmObjectTests {
     @Test
     public void setObject_wrongTypeThrows() {
         realm.beginTransaction();
-        AllJavaTypes obj = realm.createObject(AllJavaTypes.class);
+        AllJavaTypes obj = realm.createObject(AllJavaTypes.class, 0);
         Dog otherObj = realm.createObject(Dog.class);
         DynamicRealmObject dynamicObj = new DynamicRealmObject(obj);
         DynamicRealmObject dynamicWrongType = new DynamicRealmObject(otherObj);
@@ -576,8 +692,7 @@ public class DynamicRealmObjectTests {
     @Test
     public void untypedSetter_listMixedTypesThrows() {
         realm.beginTransaction();
-        AllJavaTypes obj1 = realm.createObject(AllJavaTypes.class);
-        obj1.setFieldLong(2);
+        AllJavaTypes obj1 = realm.createObject(AllJavaTypes.class, 2);
         CyclicType obj2 = realm.createObject(CyclicType.class);
 
         RealmList<DynamicRealmObject> list = new RealmList<DynamicRealmObject>();
@@ -609,7 +724,7 @@ public class DynamicRealmObjectTests {
     @Test
     public void untypedGetterSetter() {
         realm.beginTransaction();
-        AllJavaTypes obj = realm.createObject(AllJavaTypes.class);
+        AllJavaTypes obj = realm.createObject(AllJavaTypes.class, 0);
         DynamicRealmObject dObj = new DynamicRealmObject(obj);
         try {
             for (SupportedType type : SupportedType.values()) {
@@ -678,7 +793,7 @@ public class DynamicRealmObjectTests {
     @Test
     public void untypedSetter_usingStringConversion() {
         realm.beginTransaction();
-        AllJavaTypes obj = realm.createObject(AllJavaTypes.class);
+        AllJavaTypes obj = realm.createObject(AllJavaTypes.class, 0);
         DynamicRealmObject dObj = new DynamicRealmObject(obj);
         try {
             for (SupportedType type : SupportedType.values()) {
@@ -732,7 +847,7 @@ public class DynamicRealmObjectTests {
     @Test
     public void untypedSetter_illegalImplicitConversionThrows() {
         realm.beginTransaction();
-        AllJavaTypes obj = realm.createObject(AllJavaTypes.class);
+        AllJavaTypes obj = realm.createObject(AllJavaTypes.class, 0);
         DynamicRealmObject dObj = new DynamicRealmObject(obj);
         try {
             for (SupportedType type : SupportedType.values()) {
@@ -745,7 +860,7 @@ public class DynamicRealmObjectTests {
                             dObj.set(AllJavaTypes.FIELD_INT, "foo");
                             break;
                         case LONG:
-                            dObj.set(AllJavaTypes.FIELD_LONG, "foo");
+                            dObj.set(AllJavaTypes.FIELD_ID, "foo");
                             break;
                         case FLOAT:
                             dObj.set(AllJavaTypes.FIELD_FLOAT, "foo");
@@ -784,6 +899,38 @@ public class DynamicRealmObjectTests {
         }
     }
 
+    private void testChangePrimaryKeyThroughUntypedSetter(String value) {
+        final String[] primaryKeyClasses = {PrimaryKeyAsBoxedByte.CLASS_NAME, PrimaryKeyAsBoxedShort.CLASS_NAME,
+                PrimaryKeyAsBoxedInteger.CLASS_NAME, PrimaryKeyAsBoxedLong.CLASS_NAME, PrimaryKeyAsString.CLASS_NAME};
+        for (String pkClass : primaryKeyClasses) {
+            dynamicRealm.beginTransaction();
+            DynamicRealmObject object;
+            boolean isStringPK = pkClass.equals(PrimaryKeyAsString.CLASS_NAME);
+            if (isStringPK) {
+                object = dynamicRealm.createObject(pkClass, "");
+            } else {
+                object = dynamicRealm.createObject(pkClass, 0);
+            }
+
+            try {
+                object.set(isStringPK ? PrimaryKeyAsString.FIELD_PRIMARY_KEY : "id", value);
+                fail();
+            } catch (IllegalArgumentException ignored) {
+            }
+            dynamicRealm.cancelTransaction();
+        }
+    }
+
+    @Test
+    public void untypedSetter_setValue_changePrimaryKeyThrows() {
+        testChangePrimaryKeyThroughUntypedSetter("42");
+    }
+
+    @Test
+    public void untypedSetter_setNull_changePrimaryKeyThrows() {
+        testChangePrimaryKeyThroughUntypedSetter(null);
+    }
+
     @Test
     public void isNull_nullNotSupportedField() {
         assertFalse(dObjTyped.isNull(AllJavaTypes.FIELD_INT));
@@ -792,7 +939,7 @@ public class DynamicRealmObjectTests {
     @Test
     public void isNull_true() {
         realm.beginTransaction();
-        AllJavaTypes obj = realm.createObject(AllJavaTypes.class);
+        AllJavaTypes obj = realm.createObject(AllJavaTypes.class, 0);
         realm.commitTransaction();
 
         assertTrue(new DynamicRealmObject(obj).isNull(AllJavaTypes.FIELD_OBJECT));
@@ -805,10 +952,10 @@ public class DynamicRealmObjectTests {
 
     @Test
     public void getFieldNames() {
-        String[] expectedKeys = {AllJavaTypes.FIELD_STRING, AllJavaTypes.FIELD_SHORT, AllJavaTypes.FIELD_INT,
-                AllJavaTypes.FIELD_LONG, AllJavaTypes.FIELD_BYTE, AllJavaTypes.FIELD_FLOAT, AllJavaTypes.FIELD_DOUBLE,
-                AllJavaTypes.FIELD_BOOLEAN, AllJavaTypes.FIELD_DATE, AllJavaTypes.FIELD_BINARY,
-                AllJavaTypes.FIELD_OBJECT, AllJavaTypes.FIELD_LIST};
+        String[] expectedKeys = {AllJavaTypes.FIELD_STRING, AllJavaTypes.FIELD_ID, AllJavaTypes.FIELD_LONG,
+                AllJavaTypes.FIELD_SHORT, AllJavaTypes.FIELD_INT, AllJavaTypes.FIELD_BYTE, AllJavaTypes.FIELD_FLOAT,
+                AllJavaTypes.FIELD_DOUBLE, AllJavaTypes.FIELD_BOOLEAN, AllJavaTypes.FIELD_DATE,
+                AllJavaTypes.FIELD_BINARY, AllJavaTypes.FIELD_OBJECT, AllJavaTypes.FIELD_LIST};
         String[] keys = dObjTyped.getFieldNames();
         assertArrayEquals(expectedKeys, keys);
     }
@@ -878,7 +1025,7 @@ public class DynamicRealmObjectTests {
     @Test
     public void toString_nullValues() {
         dynamicRealm.beginTransaction();
-        final DynamicRealmObject obj = dynamicRealm.createObject(NullTypes.CLASS_NAME);
+        final DynamicRealmObject obj = dynamicRealm.createObject(NullTypes.CLASS_NAME, 0);
         dynamicRealm.commitTransaction();
 
         String str = obj.toString();
@@ -895,6 +1042,7 @@ public class DynamicRealmObjectTests {
         assertTrue(str.contains(NullTypes.FIELD_OBJECT_NULL + ":null"));
         assertTrue(str.contains(NullTypes.FIELD_LIST_NULL + ":RealmList<NullTypes>[0]"));
     }
+
 
     public void testExceptionMessage() {
         // test for https://github.com/realm/realm-java/issues/2141

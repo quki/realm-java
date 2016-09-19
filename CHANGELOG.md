@@ -1,3 +1,134 @@
+## 2.0.0
+
+### Breaking Changes
+
+* `isValid()` now always returns `true` instead of `false` for unmanaged `RealmObject` and `RealmList`. This puts it in line with the behaviour of the Cocoa and .NET API's (#3101).
+* armeabi is not supported anymore.
+* Added new `RealmFileException`.
+  - `IncompatibleLockFileException` has been removed and replaced by `RealmFileException` with kind `INCOMPATIBLE_LOCK_FILE`.
+  - `RealmIOExcpetion` has been removed and replaced by `RealmFileException`.
+* Removed `RealmConfiguration.Builder(Context, File)` and `RealmConfiguration.Builder(File)` constructors.
+* `RealmConfiguration.Builder.assetFile(Context, String)` has been renamed to `RealmConfiguration.Builder.assetFile(String)`.
+* Object with primary key is now required to define it when the object is created. This means that `Realm.createObject(Class<E>)` and `DynamicRealm.createObject(String)` now throws `RealmException` if they are used to create an object with a primary key field. Use `Realm.createObject(Class<E>, Object)` or `DynamicRealm.createObject(String, Object)` instead.
+* Importing from JSON without the primary key field defined in the JSON object now throws `IllegalArgumentException`.
+* Now `Realm.beginTransaction()`, `Realm.executeTransaction()` and `Realm.waitForChange()` throw `RealmMigrationNeededException` if a remote process introduces incompatible schema changes (#3409).
+* The primary key value of an object can no longer be changed after the object was created. Instead a new object must be created and all fields copied over.
+* Now `Realm.createObject(Class)` and `Realm.createObject(Class,Object)` take the values from the model's fields and default constructor. Creating objects through the `DynamicRealm` does not use these values (#777).
+* When `Realm.create*FromJson()`s create a new `RealmObject`, now they take the default values defined by the field itself and its default constructor for those fields that are not defined in the JSON object.
+
+### Enhancements
+
+* Added `realmObject.isManaged()`, `RealmObject.isManaged(obj)` and `RealmCollection.isManaged()` (#3101).
+* Added `RealmConfiguration.Builder.directory(File)`.
+* `RealmLog` has been moved to the public API. It is now possible to control which events Realm emit to Logcat. See the `RealmLog` class for more details.
+* Typed `RealmObject`s can now continue to access their fields properly even though the schema was changed while the Realm was open (#3409).
+
+### Bug fixes
+
+* Fixed a lint error in proxy classes when the 'minSdkVersion' of user's project is smaller than 11 (#3356).
+* Fixed a potential crash when there were lots of async queries waiting in the queue.
+* Fixed a bug causing the Realm Transformer to not transform field access in the model's constructors (#3361).
+* Fixed a bug causing the `NullPointerException` when calling getters/setters in the model's constructors (#2536).
+
+### Internal
+
+* Moved JNI build to CMake.
+* Updated Realm Core to 2.0.0-rc4.
+
+## 1.2.0
+
+### Bug fixes
+
+* Throw a proper exception when operating on a non-existing field with the dynamic API (#3292).
+* `DynamicRealmObject.setList` should only accept `RealmList<DynamicRealmObject>` (#3280).
+* `DynamicRealmObject.getX(fieldName)` now throws a proper exception instead of a native crash when called with a field name of the wrong type (#3294).
+* Fixed a concurrency crash which might happen when `Realm.executeTransactionAsync()` tried to call `onSucess` after the Realm was closed.
+
+### Enhancements
+
+* Added `RealmQuery.in()` for a comparison against multiple values.
+* Added byte array (`byte[]`) support to `RealmQuery`'s `equalTo` and `notEqualTo` methods.
+* Optimized internal caching of schema classes (#3315).
+
+### Internal
+
+* Updated Realm Core to 1.5.1.
+* Improved sorting speed.
+* Completely removed the `OptionalAPITransformer`.
+
+### Credits
+
+* Thanks to Brenden Kromhout (@bkromhout) for adding binary array support to `equalTo` and `notEqualTo`.
+
+## 1.1.1
+
+### Bug fixes
+
+* Fixed a wrong JNI method declaration which might cause "method not found" crash on some devices.
+* Fixed a bug that `Error` in the background async thread is not forwarded to the caller thread.
+* Fixed a crash when an empty `Collection` is passed to `insert()`/`insertOrUpdate()` (#3103).
+* Fixed a bug that does not transfer the primary key when `RealmSchemaObject.setClassName()` is called to rename a class (#3118).
+* Fixed bug in `Realm.insert` and `Realm.insertOrUpdate` methods causing a `RealmList` to be cleared when inserting a managed `RealmModel` (#3105).
+* Fixed a concurrency allocation bug in storage engine which might lead to some random crashes.
+* Bulk insertion now throws if it is not called in a transaction (#3173).
+* The IllegalStateException thrown when accessing an empty RealmObject is now more meaningful (#3200).
+* `insert()` now correctly throws an exception if two different objects have the same primary key (#3212).
+* Blackberry Z10 throwing "Function not implemented" (#3178).
+* Reduced the number of file descriptors used by Realm Core (#3197).
+* Throw a proper `IllegalStateException` if a `RealmChangeListener` is used inside an IntentService (#2875).
+
+### Enhancements
+
+* The Realm Annotation processor no longer consumes the Realm annotations. Allowing other annotation processors to run.
+
+### Internal
+
+* Updated Realm Core to 1.4.2.
+
+## 1.1.0
+
+### Bug fixes
+
+* A number of bug fixes in the storage engine related to memory management in rare cases when a Realm has been compacted.
+* Disabled the optional API transformer since it has problems with DexGuard (#3022).
+* `OnSuccess.OnSuccess()` might not be called with the correct Realm version for async transaction (#1893).
+* Fixed a bug in `copyToRealm()` causing a cyclic dependency objects being duplicated.
+* Fixed a build failure when model class has a conflicting name such as `Map`, `List`, `String`, ... (#3077).
+
+### Enhancements
+
+* Added `insert(RealmModel obj)`, `insertOrUpdate(RealmModel obj)`, `insert(Collection<RealmModel> collection)` and `insertOrUpdate(Collection<RealmModel> collection)` to perform batch inserts (#1684).
+* Enhanced `Table.toString()` to show a PrimaryKey field details (#2903).
+* Enabled ReLinker when loading a Realm from a custom path by adding a `RealmConfiguration.Builder(Context, File)` constructor (#2900).
+* Changed `targetSdkVersion` of `realm-library` to 24.
+* Logs warning if `DynamicRealm` is not closed when GC happens as it does for `Realm`.
+
+### Deprecated
+
+* `RealmConfiguration.Builder(File)`. Use `RealmConfiguration.Builder(Context, File)` instead.
+
+### Internal
+
+* Updated Realm Core to 1.2.0.
+
+## 1.0.1
+
+### Bug fixes
+
+* Fixed a crash when calling `Table.toString()` in debugger (#2429).
+* Fixed a race condition which would cause some `RealmResults` to not be properly updated inside a `RealmChangeListener`. This could result in crashes when accessing items from those results (#2926/#2951).
+* Revised `RealmResults.isLoaded()` description (#2895).
+* Fixed a bug that could cause Realm to lose track of primary key when using `RealmObjectSchema.removeField()` and `RealmObjectSchema.renameField()` (#2829/#2926).
+* Fixed a bug that prevented some devices from finding async related JNI methods correctly.
+* Updated ProGuard configuration in order not to depend on Android's default configuration (#2972).
+* Fixed a race condition between Realms notifications and other UI events. This could e.g. cause ListView to crash (#2990).
+* Fixed a bug that allowed both `RealmConfiguration.Builder.assetFile()`/`deleteRealmIfMigrationNeeded()` to be configured at the same time, which leads to the asset file accidentally being deleted in migrations (#2933).
+* Realm crashed outright when the same Realm file was opened in two processes. Realm will now optimistically retry opening for 1 second before throwing an Error (#2459).
+
+### Enhancements
+
+* Removes RxJava related APIs during bytecode transforming to make RealmObject plays well with reflection when rx.Observable doesn't exist.
+
 ## 1.0.0
 
 No changes since 0.91.1.
@@ -8,7 +139,7 @@ No changes since 0.91.1.
 
 ### Bug fixes
 
-* Fixed a bug when opening a Realm cause a staled memory mapping. Symptoms are error messages like "Bad or incompatible history type", "File format version doesn't match", and "Encrypted interprocess sharing is currently unsupported". 
+* Fixed a bug when opening a Realm causes a staled memory mapping. Symptoms are error messages like "Bad or incompatible history type", "File format version doesn't match", and "Encrypted interprocess sharing is currently unsupported".
 
 ## 0.91.0
 

@@ -17,6 +17,8 @@
 package io.realm;
 
 
+import android.app.IntentService;
+
 import java.util.AbstractList;
 import java.util.Collection;
 import java.util.Collections;
@@ -36,7 +38,7 @@ import io.realm.internal.TableOrView;
 import io.realm.internal.TableQuery;
 import io.realm.internal.TableView;
 import io.realm.internal.async.BadVersionException;
-import io.realm.internal.log.RealmLog;
+import io.realm.log.RealmLog;
 import rx.Observable;
 
 /**
@@ -70,7 +72,7 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
 
     private final static String NOT_SUPPORTED_MESSAGE = "This method is not supported by RealmResults.";
 
-    BaseRealm realm;
+    final BaseRealm realm;
     Class<E> classSpec;   // Return type
     String className;     // Class name used by DynamicRealmObjects
     private TableOrView table = null;
@@ -144,7 +146,7 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
         this.currentTableViewVersion = table.syncIfNeeded();
     }
 
-    TableOrView getTable() {
+    TableOrView getTableOrView() {
         if (table == null) {
             return realm.schema.getTable(classSpec);
         } else {
@@ -156,7 +158,17 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
      * {@inheritDoc}
      */
     public boolean isValid() {
-        return realm != null && !realm.isClosed();
+        return !realm.isClosed();
+    }
+
+    /**
+     * A {@link RealmResults} is always a managed collection.
+     *
+     * @return {@code true}.
+     * @see RealmCollection#isManaged()
+     */
+    public boolean isManaged() {
+        return true;
     }
 
     /**
@@ -165,7 +177,6 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
     @Override
     public RealmQuery<E> where() {
         realm.checkIfValid();
-
         return RealmQuery.createQueryFromResult(this);
     }
 
@@ -199,7 +210,7 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
     public E get(int location) {
         E obj;
         realm.checkIfValid();
-        TableOrView table = getTable();
+        TableOrView table = getTableOrView();
         if (table instanceof TableView) {
             obj = realm.get(classSpec, className, ((TableView) table).getSourceRowIndex(location));
         } else {
@@ -240,7 +251,7 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
     @Override
     public void deleteFromRealm(int location) {
         realm.checkIfValid();
-        TableOrView table = getTable();
+        TableOrView table = getTableOrView();
         table.remove(location);
     }
 
@@ -251,7 +262,7 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
     public boolean deleteAllFromRealm() {
         realm.checkIfValid();
         if (size() > 0) {
-            TableOrView table = getTable();
+            TableOrView table = getTableOrView();
             table.clear();
             return true;
         } else {
@@ -370,7 +381,7 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
         if (!isLoaded()) {
             return 0;
         } else {
-            long size = getTable().size();
+            long size = getTableOrView().size();
             return (size > Integer.MAX_VALUE) ? Integer.MAX_VALUE : (int) size;
         }
     }
@@ -497,7 +508,7 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
         realm.checkIfValid();
         long columnIndex = RealmQuery.getAndValidateDistinctColumnIndex(fieldName, this.table.getTable());
 
-        TableOrView tableOrView = getTable();
+        TableOrView tableOrView = getTableOrView();
         if (tableOrView instanceof Table) {
             this.table = ((Table) tableOrView).getDistinctView(columnIndex);
         } else {
@@ -606,7 +617,7 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
     public boolean deleteLastFromRealm() {
         realm.checkIfValid();
         if (size() > 0) {
-            TableOrView table = getTable();
+            TableOrView table = getTableOrView();
             table.removeLast();
             return true;
         } else {
@@ -614,6 +625,14 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
         }
     }
 
+    /**
+     * Syncs this RealmResults, so it is up to date after `advance_read` has been called.
+     * Not doing so can leave detached accessors in the table view.
+     *
+     * By design, we should only call this on looper events.
+     *
+     * NOTE: Calling this is a prerequisite to calling {@link #notifyChangeListeners(boolean)}.
+     */
     void syncIfNeeded() {
         long newVersion = table.syncIfNeeded();
         viewUpdated = newVersion != currentTableViewVersion;
@@ -628,7 +647,7 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
     @Override
     public boolean deleteFirstFromRealm() {
         if (size() > 0) {
-            TableOrView table = getTable();
+            TableOrView table = getTableOrView();
             table.removeFirst();
             return true;
         } else {
@@ -827,7 +846,7 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
      */
     void swapTableViewPointer(long handoverTableViewPointer) {
         try {
-            table = query.importHandoverTableView(handoverTableViewPointer, realm.sharedGroupManager.getNativePointer());
+            table = query.importHandoverTableView(handoverTableViewPointer, realm.sharedRealm);
             asyncQueryCompleted = true;
         } catch (BadVersionException e) {
             throw new IllegalStateException("Caller and Worker Realm should have been at the same version");
@@ -851,12 +870,11 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
     }
 
     /**
-     * Returns {@code true} if the results are not yet loaded, {@code false} if they are still loading. Synchronous
+     * Returns {@code false} if the results are not yet loaded, {@code true} if they are loaded. Synchronous
      * query methods like findAll() will always return {@code true}, while asynchronous query methods like
      * findAllAsync() will return {@code false} until the results are available.
-     * This will return {@code true} if called for an unmanaged object (created outside of Realm).
      *
-     * @return {@code true} if the query has completed and the data is available {@code false} if the query is still
+     * @return {@code true} if the query has completed and the data is available, {@code false} if the query is still
      * running.
      */
     public boolean isLoaded() {
@@ -894,11 +912,11 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
             // this may fail with BadVersionException if the caller and/or the worker thread
             // are not in sync. COMPLETED_ASYNC_REALM_RESULTS will be fired by the worker thread
             // this should handle more complex use cases like retry, ignore etc
-            table = query.importHandoverTableView(tvHandover, realm.sharedGroupManager.getNativePointer());
+            table = query.importHandoverTableView(tvHandover, realm.sharedRealm);
             asyncQueryCompleted = true;
-            notifyChangeListeners(false, true);
+            notifyChangeListeners(true);
         } catch (Exception e) {
-            RealmLog.d(e.getMessage());
+            RealmLog.debug(e.getMessage());
             return false;
         }
         return true;
@@ -909,15 +927,15 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
      *
      * @param listener the change listener to be notified.
      * @throws IllegalArgumentException if the change listener is {@code null}.
-     * @throws IllegalStateException if you try to add a listener from a non-Looper Thread.
+     * @throws IllegalStateException if you try to add a listener from a non-Looper or {@link IntentService} thread.
      */
     public void addChangeListener(RealmChangeListener<RealmResults<E>> listener) {
         if (listener == null) {
             throw new IllegalArgumentException("Listener should not be null");
         }
         realm.checkIfValid();
-        if (realm.handler == null) {
-            throw new IllegalStateException("You can't register a listener from a non-Looper thread ");
+        if (!realm.handlerController.isAutoRefreshEnabled()) {
+            throw new IllegalStateException("You can't register a listener from a non-Looper thread or IntentService thread. ");
         }
         if (!listeners.contains(listener)) {
             listeners.add(listener);
@@ -991,15 +1009,10 @@ public final class RealmResults<E extends RealmModel> extends AbstractList<E> im
 
     /**
      * Notifies all registered listeners.
+     *
+     * NOTE: Remember to call `syncIfNeeded` before calling this method.
      */
-    void notifyChangeListeners() {
-        notifyChangeListeners(true, false);
-    }
-
-    private void notifyChangeListeners(boolean syncBeforeNotifying, boolean forceNotify) {
-        if (syncBeforeNotifying) {
-            syncIfNeeded();
-        }
+    void notifyChangeListeners(boolean forceNotify) {
         if (!listeners.isEmpty()) {
             // table might be null (if the async query didn't complete
             // but we have already registered listeners for it)

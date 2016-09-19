@@ -1,61 +1,75 @@
 package io.realm;
 
 
+import android.annotation.TargetApi;
+import android.os.Build;
 import android.util.JsonReader;
 import android.util.JsonToken;
-import io.realm.RealmFieldType;
 import io.realm.exceptions.RealmMigrationNeededException;
 import io.realm.internal.ColumnInfo;
-import io.realm.internal.ImplicitTransaction;
 import io.realm.internal.LinkView;
 import io.realm.internal.RealmObjectProxy;
-import io.realm.internal.Row;
+import io.realm.internal.SharedRealm;
 import io.realm.internal.Table;
 import io.realm.internal.TableOrView;
 import io.realm.internal.android.JsonUtils;
+import io.realm.log.RealmLog;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Future;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import some.test.Booleans;
 
-public class BooleansRealmProxy extends Booleans
+public class BooleansRealmProxy extends some.test.Booleans
         implements RealmObjectProxy, BooleansRealmProxyInterface {
 
-    static final class BooleansColumnInfo extends ColumnInfo {
+    static final class BooleansColumnInfo extends ColumnInfo
+            implements Cloneable {
 
-        public final long doneIndex;
-        public final long isReadyIndex;
-        public final long mCompletedIndex;
-        public final long anotherBooleanIndex;
+        public long doneIndex;
+        public long isReadyIndex;
+        public long mCompletedIndex;
+        public long anotherBooleanIndex;
 
         BooleansColumnInfo(String path, Table table) {
             final Map<String, Long> indicesMap = new HashMap<String, Long>(4);
             this.doneIndex = getValidColumnIndex(path, table, "Booleans", "done");
             indicesMap.put("done", this.doneIndex);
-
             this.isReadyIndex = getValidColumnIndex(path, table, "Booleans", "isReady");
             indicesMap.put("isReady", this.isReadyIndex);
-
             this.mCompletedIndex = getValidColumnIndex(path, table, "Booleans", "mCompleted");
             indicesMap.put("mCompleted", this.mCompletedIndex);
-
             this.anotherBooleanIndex = getValidColumnIndex(path, table, "Booleans", "anotherBoolean");
             indicesMap.put("anotherBoolean", this.anotherBooleanIndex);
 
             setIndicesMap(indicesMap);
         }
-    }
 
-    private final BooleansColumnInfo columnInfo;
-    private final ProxyState proxyState;
+        @Override
+        public final void copyColumnInfoFrom(ColumnInfo other) {
+            final BooleansColumnInfo otherInfo = (BooleansColumnInfo) other;
+            this.doneIndex = otherInfo.doneIndex;
+            this.isReadyIndex = otherInfo.isReadyIndex;
+            this.mCompletedIndex = otherInfo.mCompletedIndex;
+            this.anotherBooleanIndex = otherInfo.anotherBooleanIndex;
+
+            setIndicesMap(otherInfo.getIndicesMap());
+        }
+
+        @Override
+        public final BooleansColumnInfo clone() {
+            return (BooleansColumnInfo) super.clone();
+        }
+
+    }
+    private BooleansColumnInfo columnInfo;
+    private ProxyState proxyState;
     private static final List<String> FIELD_NAMES;
     static {
         List<String> fieldNames = new ArrayList<String>();
@@ -66,58 +80,134 @@ public class BooleansRealmProxy extends Booleans
         FIELD_NAMES = Collections.unmodifiableList(fieldNames);
     }
 
-    BooleansRealmProxy(ColumnInfo columnInfo) {
-        this.columnInfo = (BooleansColumnInfo) columnInfo;
-        this.proxyState = new ProxyState(Booleans.class, this);
+    BooleansRealmProxy() {
+        if (proxyState == null) {
+            injectObjectContext();
+        }
+        proxyState.setConstructionFinished();
+    }
+
+    private void injectObjectContext() {
+        final BaseRealm.RealmObjectContext context = BaseRealm.objectContext.get();
+        this.columnInfo = (BooleansColumnInfo) context.getColumnInfo();
+        this.proxyState = new ProxyState(some.test.Booleans.class, this);
+        proxyState.setRealm$realm(context.getRealm());
+        proxyState.setRow$realm(context.getRow());
+        proxyState.setAcceptDefaultValue$realm(context.getAcceptDefaultValue());
+        proxyState.setExcludeFields$realm(context.getExcludeFields());
     }
 
     @SuppressWarnings("cast")
     public boolean realmGet$done() {
+        if (proxyState == null) {
+            // Called from model's constructor. Inject context.
+            injectObjectContext();
+        }
+
         proxyState.getRealm$realm().checkIfValid();
         return (boolean) proxyState.getRow$realm().getBoolean(columnInfo.doneIndex);
     }
 
     public void realmSet$done(boolean value) {
+        if (proxyState == null) {
+            // Called from model's constructor. Inject context.
+            injectObjectContext();
+        }
+
+        if (proxyState.isUnderConstruction()) {
+            if (!proxyState.getAcceptDefaultValue$realm()) {
+                return;
+            }
+        }
+
         proxyState.getRealm$realm().checkIfValid();
         proxyState.getRow$realm().setBoolean(columnInfo.doneIndex, value);
     }
 
     @SuppressWarnings("cast")
     public boolean realmGet$isReady() {
+        if (proxyState == null) {
+            // Called from model's constructor. Inject context.
+            injectObjectContext();
+        }
+
         proxyState.getRealm$realm().checkIfValid();
         return (boolean) proxyState.getRow$realm().getBoolean(columnInfo.isReadyIndex);
     }
 
     public void realmSet$isReady(boolean value) {
+        if (proxyState == null) {
+            // Called from model's constructor. Inject context.
+            injectObjectContext();
+        }
+
+        if (proxyState.isUnderConstruction()) {
+            if (!proxyState.getAcceptDefaultValue$realm()) {
+                return;
+            }
+        }
+
         proxyState.getRealm$realm().checkIfValid();
         proxyState.getRow$realm().setBoolean(columnInfo.isReadyIndex, value);
     }
 
     @SuppressWarnings("cast")
     public boolean realmGet$mCompleted() {
+        if (proxyState == null) {
+            // Called from model's constructor. Inject context.
+            injectObjectContext();
+        }
+
         proxyState.getRealm$realm().checkIfValid();
         return (boolean) proxyState.getRow$realm().getBoolean(columnInfo.mCompletedIndex);
     }
 
     public void realmSet$mCompleted(boolean value) {
+        if (proxyState == null) {
+            // Called from model's constructor. Inject context.
+            injectObjectContext();
+        }
+
+        if (proxyState.isUnderConstruction()) {
+            if (!proxyState.getAcceptDefaultValue$realm()) {
+                return;
+            }
+        }
+
         proxyState.getRealm$realm().checkIfValid();
         proxyState.getRow$realm().setBoolean(columnInfo.mCompletedIndex, value);
     }
 
     @SuppressWarnings("cast")
     public boolean realmGet$anotherBoolean() {
+        if (proxyState == null) {
+            // Called from model's constructor. Inject context.
+            injectObjectContext();
+        }
+
         proxyState.getRealm$realm().checkIfValid();
         return (boolean) proxyState.getRow$realm().getBoolean(columnInfo.anotherBooleanIndex);
     }
 
     public void realmSet$anotherBoolean(boolean value) {
+        if (proxyState == null) {
+            // Called from model's constructor. Inject context.
+            injectObjectContext();
+        }
+
+        if (proxyState.isUnderConstruction()) {
+            if (!proxyState.getAcceptDefaultValue$realm()) {
+                return;
+            }
+        }
+
         proxyState.getRealm$realm().checkIfValid();
         proxyState.getRow$realm().setBoolean(columnInfo.anotherBooleanIndex, value);
     }
 
-    public static Table initTable(ImplicitTransaction transaction) {
-        if (!transaction.hasTable("class_Booleans")) {
-            Table table = transaction.getTable("class_Booleans");
+    public static Table initTable(SharedRealm sharedRealm) {
+        if (!sharedRealm.hasTable("class_Booleans")) {
+            Table table = sharedRealm.getTable("class_Booleans");
             table.addColumn(RealmFieldType.BOOLEAN, "done", Table.NOT_NULLABLE);
             table.addColumn(RealmFieldType.BOOLEAN, "isReady", Table.NOT_NULLABLE);
             table.addColumn(RealmFieldType.BOOLEAN, "mCompleted", Table.NOT_NULLABLE);
@@ -125,61 +215,69 @@ public class BooleansRealmProxy extends Booleans
             table.setPrimaryKey("");
             return table;
         }
-        return transaction.getTable("class_Booleans");
+        return sharedRealm.getTable("class_Booleans");
     }
 
-    public static BooleansColumnInfo validateTable(ImplicitTransaction transaction) {
-        if (transaction.hasTable("class_Booleans")) {
-            Table table = transaction.getTable("class_Booleans");
-            if (table.getColumnCount() != 4) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Field count does not match - expected 4 but was " + table.getColumnCount());
+    public static BooleansColumnInfo validateTable(SharedRealm sharedRealm, boolean allowExtraColumns) {
+        if (sharedRealm.hasTable("class_Booleans")) {
+            Table table = sharedRealm.getTable("class_Booleans");
+            final long columnCount = table.getColumnCount();
+            if (columnCount != 4) {
+                if (columnCount < 4) {
+                    throw new RealmMigrationNeededException(sharedRealm.getPath(), "Field count is less than expected - expected 4 but was " + columnCount);
+                }
+                if (allowExtraColumns) {
+                    RealmLog.debug("Field count is more than expected - expected 4 but was %1$d", columnCount);
+                } else {
+                    throw new RealmMigrationNeededException(sharedRealm.getPath(), "Field count is more than expected - expected 4 but was " + columnCount);
+                }
             }
             Map<String, RealmFieldType> columnTypes = new HashMap<String, RealmFieldType>();
             for (long i = 0; i < 4; i++) {
                 columnTypes.put(table.getColumnName(i), table.getColumnType(i));
             }
 
-            final BooleansColumnInfo columnInfo = new BooleansColumnInfo(transaction.getPath(), table);
+            final BooleansColumnInfo columnInfo = new BooleansColumnInfo(sharedRealm.getPath(), table);
 
             if (!columnTypes.containsKey("done")) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Missing field 'done' in existing Realm file. Either remove field or migrate using io.realm.internal.Table.addColumn().");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Missing field 'done' in existing Realm file. Either remove field or migrate using io.realm.internal.Table.addColumn().");
             }
             if (columnTypes.get("done") != RealmFieldType.BOOLEAN) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Invalid type 'boolean' for field 'done' in existing Realm file.");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Invalid type 'boolean' for field 'done' in existing Realm file.");
             }
             if (table.isColumnNullable(columnInfo.doneIndex)) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Field 'done' does support null values in the existing Realm file. Use corresponding boxed type for field 'done' or migrate using RealmObjectSchema.setNullable().");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Field 'done' does support null values in the existing Realm file. Use corresponding boxed type for field 'done' or migrate using RealmObjectSchema.setNullable().");
             }
             if (!columnTypes.containsKey("isReady")) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Missing field 'isReady' in existing Realm file. Either remove field or migrate using io.realm.internal.Table.addColumn().");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Missing field 'isReady' in existing Realm file. Either remove field or migrate using io.realm.internal.Table.addColumn().");
             }
             if (columnTypes.get("isReady") != RealmFieldType.BOOLEAN) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Invalid type 'boolean' for field 'isReady' in existing Realm file.");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Invalid type 'boolean' for field 'isReady' in existing Realm file.");
             }
             if (table.isColumnNullable(columnInfo.isReadyIndex)) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Field 'isReady' does support null values in the existing Realm file. Use corresponding boxed type for field 'isReady' or migrate using RealmObjectSchema.setNullable().");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Field 'isReady' does support null values in the existing Realm file. Use corresponding boxed type for field 'isReady' or migrate using RealmObjectSchema.setNullable().");
             }
             if (!columnTypes.containsKey("mCompleted")) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Missing field 'mCompleted' in existing Realm file. Either remove field or migrate using io.realm.internal.Table.addColumn().");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Missing field 'mCompleted' in existing Realm file. Either remove field or migrate using io.realm.internal.Table.addColumn().");
             }
             if (columnTypes.get("mCompleted") != RealmFieldType.BOOLEAN) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Invalid type 'boolean' for field 'mCompleted' in existing Realm file.");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Invalid type 'boolean' for field 'mCompleted' in existing Realm file.");
             }
             if (table.isColumnNullable(columnInfo.mCompletedIndex)) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Field 'mCompleted' does support null values in the existing Realm file. Use corresponding boxed type for field 'mCompleted' or migrate using RealmObjectSchema.setNullable().");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Field 'mCompleted' does support null values in the existing Realm file. Use corresponding boxed type for field 'mCompleted' or migrate using RealmObjectSchema.setNullable().");
             }
             if (!columnTypes.containsKey("anotherBoolean")) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Missing field 'anotherBoolean' in existing Realm file. Either remove field or migrate using io.realm.internal.Table.addColumn().");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Missing field 'anotherBoolean' in existing Realm file. Either remove field or migrate using io.realm.internal.Table.addColumn().");
             }
             if (columnTypes.get("anotherBoolean") != RealmFieldType.BOOLEAN) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Invalid type 'boolean' for field 'anotherBoolean' in existing Realm file.");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Invalid type 'boolean' for field 'anotherBoolean' in existing Realm file.");
             }
             if (table.isColumnNullable(columnInfo.anotherBooleanIndex)) {
-                throw new RealmMigrationNeededException(transaction.getPath(), "Field 'anotherBoolean' does support null values in the existing Realm file. Use corresponding boxed type for field 'anotherBoolean' or migrate using RealmObjectSchema.setNullable().");
+                throw new RealmMigrationNeededException(sharedRealm.getPath(), "Field 'anotherBoolean' does support null values in the existing Realm file. Use corresponding boxed type for field 'anotherBoolean' or migrate using RealmObjectSchema.setNullable().");
             }
             return columnInfo;
         } else {
-            throw new RealmMigrationNeededException(transaction.getPath(), "The Booleans class is missing from the schema for this Realm.");
+            throw new RealmMigrationNeededException(sharedRealm.getPath(), "The 'Booleans' class is missing from the schema for this Realm.");
         }
     }
 
@@ -192,33 +290,34 @@ public class BooleansRealmProxy extends Booleans
     }
 
     @SuppressWarnings("cast")
-    public static Booleans createOrUpdateUsingJsonObject(Realm realm, JSONObject json, boolean update)
+    public static some.test.Booleans createOrUpdateUsingJsonObject(Realm realm, JSONObject json, boolean update)
             throws JSONException {
-        Booleans obj = realm.createObject(Booleans.class);
+        final List<String> excludeFields = Collections.<String> emptyList();
+        some.test.Booleans obj = realm.createObjectInternal(some.test.Booleans.class, true, excludeFields);
         if (json.has("done")) {
             if (json.isNull("done")) {
-                throw new IllegalArgumentException("Trying to set non-nullable field done to null.");
+                throw new IllegalArgumentException("Trying to set non-nullable field 'done' to null.");
             } else {
                 ((BooleansRealmProxyInterface) obj).realmSet$done((boolean) json.getBoolean("done"));
             }
         }
         if (json.has("isReady")) {
             if (json.isNull("isReady")) {
-                throw new IllegalArgumentException("Trying to set non-nullable field isReady to null.");
+                throw new IllegalArgumentException("Trying to set non-nullable field 'isReady' to null.");
             } else {
                 ((BooleansRealmProxyInterface) obj).realmSet$isReady((boolean) json.getBoolean("isReady"));
             }
         }
         if (json.has("mCompleted")) {
             if (json.isNull("mCompleted")) {
-                throw new IllegalArgumentException("Trying to set non-nullable field mCompleted to null.");
+                throw new IllegalArgumentException("Trying to set non-nullable field 'mCompleted' to null.");
             } else {
                 ((BooleansRealmProxyInterface) obj).realmSet$mCompleted((boolean) json.getBoolean("mCompleted"));
             }
         }
         if (json.has("anotherBoolean")) {
             if (json.isNull("anotherBoolean")) {
-                throw new IllegalArgumentException("Trying to set non-nullable field anotherBoolean to null.");
+                throw new IllegalArgumentException("Trying to set non-nullable field 'anotherBoolean' to null.");
             } else {
                 ((BooleansRealmProxyInterface) obj).realmSet$anotherBoolean((boolean) json.getBoolean("anotherBoolean"));
             }
@@ -227,37 +326,38 @@ public class BooleansRealmProxy extends Booleans
     }
 
     @SuppressWarnings("cast")
-    public static Booleans createUsingJsonStream(Realm realm, JsonReader reader)
+    @TargetApi(Build.VERSION_CODES.HONEYCOMB)
+    public static some.test.Booleans createUsingJsonStream(Realm realm, JsonReader reader)
             throws IOException {
-        Booleans obj = realm.createObject(Booleans.class);
+        some.test.Booleans obj = new some.test.Booleans();
         reader.beginObject();
         while (reader.hasNext()) {
             String name = reader.nextName();
             if (name.equals("done")) {
                 if (reader.peek() == JsonToken.NULL) {
                     reader.skipValue();
-                    throw new IllegalArgumentException("Trying to set non-nullable field done to null.");
+                    throw new IllegalArgumentException("Trying to set non-nullable field 'done' to null.");
                 } else {
                     ((BooleansRealmProxyInterface) obj).realmSet$done((boolean) reader.nextBoolean());
                 }
             } else if (name.equals("isReady")) {
                 if (reader.peek() == JsonToken.NULL) {
                     reader.skipValue();
-                    throw new IllegalArgumentException("Trying to set non-nullable field isReady to null.");
+                    throw new IllegalArgumentException("Trying to set non-nullable field 'isReady' to null.");
                 } else {
                     ((BooleansRealmProxyInterface) obj).realmSet$isReady((boolean) reader.nextBoolean());
                 }
             } else if (name.equals("mCompleted")) {
                 if (reader.peek() == JsonToken.NULL) {
                     reader.skipValue();
-                    throw new IllegalArgumentException("Trying to set non-nullable field mCompleted to null.");
+                    throw new IllegalArgumentException("Trying to set non-nullable field 'mCompleted' to null.");
                 } else {
                     ((BooleansRealmProxyInterface) obj).realmSet$mCompleted((boolean) reader.nextBoolean());
                 }
             } else if (name.equals("anotherBoolean")) {
                 if (reader.peek() == JsonToken.NULL) {
                     reader.skipValue();
-                    throw new IllegalArgumentException("Trying to set non-nullable field anotherBoolean to null.");
+                    throw new IllegalArgumentException("Trying to set non-nullable field 'anotherBoolean' to null.");
                 } else {
                     ((BooleansRealmProxyInterface) obj).realmSet$anotherBoolean((boolean) reader.nextBoolean());
                 }
@@ -266,45 +366,134 @@ public class BooleansRealmProxy extends Booleans
             }
         }
         reader.endObject();
+        obj = realm.copyToRealm(obj);
         return obj;
     }
 
-    public static Booleans copyOrUpdate(Realm realm, Booleans object, boolean update, Map<RealmModel,RealmObjectProxy> cache) {
+    public static some.test.Booleans copyOrUpdate(Realm realm, some.test.Booleans object, boolean update, Map<RealmModel,RealmObjectProxy> cache) {
         if (object instanceof RealmObjectProxy && ((RealmObjectProxy) object).realmGet$proxyState().getRealm$realm() != null && ((RealmObjectProxy) object).realmGet$proxyState().getRealm$realm().threadId != realm.threadId) {
             throw new IllegalArgumentException("Objects which belong to Realm instances in other threads cannot be copied into this Realm instance.");
         }
         if (object instanceof RealmObjectProxy && ((RealmObjectProxy)object).realmGet$proxyState().getRealm$realm() != null && ((RealmObjectProxy)object).realmGet$proxyState().getRealm$realm().getPath().equals(realm.getPath())) {
             return object;
         }
-        return copy(realm, object, update, cache);
+        final BaseRealm.RealmObjectContext objectContext = BaseRealm.objectContext.get();
+        RealmObjectProxy cachedRealmObject = cache.get(object);
+        if (cachedRealmObject != null) {
+            return (some.test.Booleans) cachedRealmObject;
+        } else {
+            return copy(realm, object, update, cache);
+        }
     }
 
-    public static Booleans copy(Realm realm, Booleans newObject, boolean update, Map<RealmModel,RealmObjectProxy> cache) {
-        Booleans realmObject = realm.createObject(Booleans.class);
-        cache.put(newObject, (RealmObjectProxy) realmObject);
-        ((BooleansRealmProxyInterface) realmObject).realmSet$done(((BooleansRealmProxyInterface) newObject).realmGet$done());
-        ((BooleansRealmProxyInterface) realmObject).realmSet$isReady(((BooleansRealmProxyInterface) newObject).realmGet$isReady());
-        ((BooleansRealmProxyInterface) realmObject).realmSet$mCompleted(((BooleansRealmProxyInterface) newObject).realmGet$mCompleted());
-        ((BooleansRealmProxyInterface) realmObject).realmSet$anotherBoolean(((BooleansRealmProxyInterface) newObject).realmGet$anotherBoolean());
-        return realmObject;
+    public static some.test.Booleans copy(Realm realm, some.test.Booleans newObject, boolean update, Map<RealmModel,RealmObjectProxy> cache) {
+        RealmObjectProxy cachedRealmObject = cache.get(newObject);
+        if (cachedRealmObject != null) {
+            return (some.test.Booleans) cachedRealmObject;
+        } else {
+            // rejecting default values to avoid creating unexpected objects from RealmModel/RealmList fields.
+            some.test.Booleans realmObject = realm.createObjectInternal(some.test.Booleans.class, false, Collections.<String>emptyList());
+            cache.put(newObject, (RealmObjectProxy) realmObject);
+            ((BooleansRealmProxyInterface) realmObject).realmSet$done(((BooleansRealmProxyInterface) newObject).realmGet$done());
+            ((BooleansRealmProxyInterface) realmObject).realmSet$isReady(((BooleansRealmProxyInterface) newObject).realmGet$isReady());
+            ((BooleansRealmProxyInterface) realmObject).realmSet$mCompleted(((BooleansRealmProxyInterface) newObject).realmGet$mCompleted());
+            ((BooleansRealmProxyInterface) realmObject).realmSet$anotherBoolean(((BooleansRealmProxyInterface) newObject).realmGet$anotherBoolean());
+            return realmObject;
+        }
     }
 
-    public static Booleans createDetachedCopy(Booleans realmObject, int currentDepth, int maxDepth, Map<RealmModel, CacheData<RealmModel>> cache) {
+    public static long insert(Realm realm, some.test.Booleans object, Map<RealmModel,Long> cache) {
+        if (object instanceof RealmObjectProxy && ((RealmObjectProxy)object).realmGet$proxyState().getRealm$realm() != null && ((RealmObjectProxy)object).realmGet$proxyState().getRealm$realm().getPath().equals(realm.getPath())) {
+            return ((RealmObjectProxy)object).realmGet$proxyState().getRow$realm().getIndex();
+        }
+        Table table = realm.getTable(some.test.Booleans.class);
+        long tableNativePtr = table.getNativeTablePointer();
+        BooleansColumnInfo columnInfo = (BooleansColumnInfo) realm.schema.getColumnInfo(some.test.Booleans.class);
+        long rowIndex = Table.nativeAddEmptyRow(tableNativePtr, 1);
+        cache.put(object, rowIndex);
+        Table.nativeSetBoolean(tableNativePtr, columnInfo.doneIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$done());
+        Table.nativeSetBoolean(tableNativePtr, columnInfo.isReadyIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$isReady());
+        Table.nativeSetBoolean(tableNativePtr, columnInfo.mCompletedIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$mCompleted());
+        Table.nativeSetBoolean(tableNativePtr, columnInfo.anotherBooleanIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$anotherBoolean());
+        return rowIndex;
+    }
+
+    public static void insert(Realm realm, Iterator<? extends RealmModel> objects, Map<RealmModel,Long> cache) {
+        Table table = realm.getTable(some.test.Booleans.class);
+        long tableNativePtr = table.getNativeTablePointer();
+        BooleansColumnInfo columnInfo = (BooleansColumnInfo) realm.schema.getColumnInfo(some.test.Booleans.class);
+        some.test.Booleans object = null;
+        while (objects.hasNext()) {
+            object = (some.test.Booleans) objects.next();
+            if(!cache.containsKey(object)) {
+                if (object instanceof RealmObjectProxy && ((RealmObjectProxy)object).realmGet$proxyState().getRealm$realm() != null && ((RealmObjectProxy)object).realmGet$proxyState().getRealm$realm().getPath().equals(realm.getPath())) {
+                    cache.put(object, ((RealmObjectProxy)object).realmGet$proxyState().getRow$realm().getIndex());
+                    continue;
+                }
+                long rowIndex = Table.nativeAddEmptyRow(tableNativePtr, 1);
+                cache.put(object, rowIndex);
+                Table.nativeSetBoolean(tableNativePtr, columnInfo.doneIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$done());
+                Table.nativeSetBoolean(tableNativePtr, columnInfo.isReadyIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$isReady());
+                Table.nativeSetBoolean(tableNativePtr, columnInfo.mCompletedIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$mCompleted());
+                Table.nativeSetBoolean(tableNativePtr, columnInfo.anotherBooleanIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$anotherBoolean());
+            }
+        }
+    }
+
+    public static long insertOrUpdate(Realm realm, some.test.Booleans object, Map<RealmModel,Long> cache) {
+        if (object instanceof RealmObjectProxy && ((RealmObjectProxy)object).realmGet$proxyState().getRealm$realm() != null && ((RealmObjectProxy)object).realmGet$proxyState().getRealm$realm().getPath().equals(realm.getPath())) {
+            return ((RealmObjectProxy)object).realmGet$proxyState().getRow$realm().getIndex();
+        }
+        Table table = realm.getTable(some.test.Booleans.class);
+        long tableNativePtr = table.getNativeTablePointer();
+        BooleansColumnInfo columnInfo = (BooleansColumnInfo) realm.schema.getColumnInfo(some.test.Booleans.class);
+        long rowIndex = Table.nativeAddEmptyRow(tableNativePtr, 1);
+        cache.put(object, rowIndex);
+        Table.nativeSetBoolean(tableNativePtr, columnInfo.doneIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$done());
+        Table.nativeSetBoolean(tableNativePtr, columnInfo.isReadyIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$isReady());
+        Table.nativeSetBoolean(tableNativePtr, columnInfo.mCompletedIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$mCompleted());
+        Table.nativeSetBoolean(tableNativePtr, columnInfo.anotherBooleanIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$anotherBoolean());
+        return rowIndex;
+    }
+
+    public static void insertOrUpdate(Realm realm, Iterator<? extends RealmModel> objects, Map<RealmModel,Long> cache) {
+        Table table = realm.getTable(some.test.Booleans.class);
+        long tableNativePtr = table.getNativeTablePointer();
+        BooleansColumnInfo columnInfo = (BooleansColumnInfo) realm.schema.getColumnInfo(some.test.Booleans.class);
+        some.test.Booleans object = null;
+        while (objects.hasNext()) {
+            object = (some.test.Booleans) objects.next();
+            if(!cache.containsKey(object)) {
+                if (object instanceof RealmObjectProxy && ((RealmObjectProxy)object).realmGet$proxyState().getRealm$realm() != null && ((RealmObjectProxy)object).realmGet$proxyState().getRealm$realm().getPath().equals(realm.getPath())) {
+                    cache.put(object, ((RealmObjectProxy)object).realmGet$proxyState().getRow$realm().getIndex());
+                    continue;
+                }
+                long rowIndex = Table.nativeAddEmptyRow(tableNativePtr, 1);
+                cache.put(object, rowIndex);
+                Table.nativeSetBoolean(tableNativePtr, columnInfo.doneIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$done());
+                Table.nativeSetBoolean(tableNativePtr, columnInfo.isReadyIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$isReady());
+                Table.nativeSetBoolean(tableNativePtr, columnInfo.mCompletedIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$mCompleted());
+                Table.nativeSetBoolean(tableNativePtr, columnInfo.anotherBooleanIndex, rowIndex, ((BooleansRealmProxyInterface)object).realmGet$anotherBoolean());
+            }
+        }
+    }
+
+    public static some.test.Booleans createDetachedCopy(some.test.Booleans realmObject, int currentDepth, int maxDepth, Map<RealmModel, CacheData<RealmModel>> cache) {
         if (currentDepth > maxDepth || realmObject == null) {
             return null;
         }
         CacheData<RealmModel> cachedObject = cache.get(realmObject);
-        Booleans unmanagedObject;
+        some.test.Booleans unmanagedObject;
         if (cachedObject != null) {
             // Reuse cached object or recreate it because it was encountered at a lower depth.
             if (currentDepth >= cachedObject.minDepth) {
-                return (Booleans)cachedObject.object;
+                return (some.test.Booleans)cachedObject.object;
             } else {
-                unmanagedObject = (Booleans)cachedObject.object;
+                unmanagedObject = (some.test.Booleans)cachedObject.object;
                 cachedObject.minDepth = currentDepth;
             }
         } else {
-            unmanagedObject = new Booleans();
+            unmanagedObject = new some.test.Booleans();
             cache.put(realmObject, new RealmObjectProxy.CacheData(currentDepth, unmanagedObject));
         }
         ((BooleansRealmProxyInterface) unmanagedObject).realmSet$done(((BooleansRealmProxyInterface) realmObject).realmGet$done());
@@ -365,7 +554,7 @@ public class BooleansRealmProxy extends Booleans
 
         String path = proxyState.getRealm$realm().getPath();
         String otherPath = aBooleans.proxyState.getRealm$realm().getPath();
-        if (path != null ? !path.equals(otherPath) : otherPath != null) return false;;
+        if (path != null ? !path.equals(otherPath) : otherPath != null) return false;
 
         String tableName = proxyState.getRow$realm().getTable().getName();
         String otherTableName = aBooleans.proxyState.getRow$realm().getTable().getName();
